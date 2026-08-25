@@ -127,8 +127,9 @@
   function kcalPillHtml(kcal, kind) {
     if (kcal == null) return "";
     const cls = kind === "day" ? "kcal-pill day" : "kcal-pill meal";
+    // Day total = sum of per-person meal kcals; meal pill = per person
     const suffix = kind === "day" ? " kcal" : " kcal/p";
-    return '<span class="' + cls + '">' + kcal + suffix + "</span>";
+    return '<span class="' + cls + '" aria-label="' + kcal + suffix + '">' + kcal + suffix + "</span>";
   }
 
   /* ---------- navigation ---------- */
@@ -248,17 +249,19 @@
       if (!day.showLunch) extras.push('<button type="button" class="btn btn-sm btn-secondary" data-act="add-slot" data-slot="lunch">+ Lunch</button>');
 
       const dayKcal = dayTotalKcal(day);
+      // Layout: [Datum + groen dagtotaal-kcal] ........ [VANDAAG]
       card.innerHTML =
         '<div class="day-top">' +
+        '<div class="day-top-left">' +
         '<div class="date-block"><div class="dow">' +
         capitalize(meta.dow) +
         '</div><div class="dom">' +
         meta.label +
         "</div></div>" +
-        '<div class="day-top-right">' +
-        (meta.isToday ? '<span class="badge-today">Vandaag</span>' : "") +
         kcalPillHtml(dayKcal, "day") +
-        "</div></div>" +
+        "</div>" +
+        (meta.isToday ? '<span class="badge-today">Vandaag</span>' : "") +
+        "</div>" +
         mealsHtml +
         '<div class="btn-row">' +
         '<button type="button" class="btn btn-sm btn-primary" data-act="open-day">Open</button>' +
@@ -354,12 +357,16 @@
     const recipe = recipeId ? MealStore.getRecipe(recipeId) : null;
     const servings = recipeId ? MealStore.getSlotServings(day, slot) : null;
     const kcal = recipe ? MealStore.getRecipeKcalPerPerson(recipe) : null;
+    // Layout: [AVOND + groen kcal eronder] | [naam · 2p + sterren]
     return (
       '<div class="meal-row" data-slot="' +
       slot +
       '">' +
+      '<div class="slot-col">' +
       '<div class="slot-label">' +
       SLOT_LABEL[slot] +
+      "</div>" +
+      (kcal != null ? kcalPillHtml(kcal, "meal") : "") +
       "</div>" +
       '<div class="meal-main">' +
       '<div class="meal-name' +
@@ -369,7 +376,6 @@
       (name && servings ? " · " + servings + "p" : "") +
       "</div>" +
       (recipe && recipe.rating ? starsHtml(recipe.rating) : "") +
-      (kcal != null ? kcalPillHtml(kcal, "meal") : "") +
       "</div></div>"
     );
   }

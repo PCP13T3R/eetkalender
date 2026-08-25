@@ -341,14 +341,6 @@ button {
   font-weight: 600;
 }
 
-.day-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
 .day-top .date-block .dow {
   font-weight: 700;
   font-size: 1rem;
@@ -388,26 +380,45 @@ button {
 }
 
 .kcal-pill.day {
-  font-size: 0.85rem;
-  padding: 6px 12px;
-  margin-left: auto;
+  font-size: 0.82rem;
+  padding: 6px 11px;
+  flex-shrink: 0;
 }
 
 .kcal-pill.meal {
   margin-top: 6px;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 750;
+  padding: 4px 8px;
 }
 
 .day-top {
-  flex-wrap: wrap;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: nowrap;
 }
 
-.day-top .day-top-right {
+.day-top-left {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-left: auto;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.meal-row .slot-col {
+  width: 72px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.meal-row .slot-label {
+  width: auto;
 }
 
 .meal-row {
