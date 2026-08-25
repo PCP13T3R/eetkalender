@@ -1005,6 +1005,10 @@
   }
 
   /* ---------- Prep + Cart (shopping) ---------- */
+  /** Session UI: days confirmed + pending "at home" checks (no popup per item) */
+  let prepDaysConfirmed = false;
+  let prepHomePending = {}; // key -> true (strikethrough, not yet committed)
+
   function shoppingDayRange() {
     const start = MealStore.todayISO();
     const days = [];
@@ -1025,10 +1029,33 @@
     return item.unit || "";
   }
 
-  /** Dubbele bevestiging voor harde deletes */
+  /** Dubbele bevestiging voor harde deletes (alleen Winkel-tab) */
   function confirmTwice(msg1, msg2) {
     if (!confirm(msg1)) return false;
     return confirm(msg2 || "Echt zeker? Dit kan niet ongedaan.");
+  }
+
+  function getDayPickChecked() {
+    return $$("#shop-day-pick input:checked").map((x) => x.value);
+  }
+
+  function updatePrepDaysUi() {
+    const after = $("#prep-after-days");
+    const status = $("#prep-days-status");
+    const days = MealStore.get().shopping.selectedDays || [];
+    if (after) after.classList.toggle("hidden", !prepDaysConfirmed);
+    if (status) {
+      if (!prepDaysConfirmed) {
+        status.textContent = "Vink dagen aan en tik op “Bevestig dagen”.";
+      } else if (!days.length) {
+        status.textContent = "Geen dagen bevestigd — kies minstens één dag (of alleen extra’s).";
+      } else {
+        status.textContent =
+          "✓ " +
+          days.length +
+          " dag(en) bevestigd. Pas hieronder extra’s en thuis-voorraad aan.";
+      }
+    }
   }
 
   function renderPrep() {
@@ -1038,7 +1065,12 @@
     const prevSelected = state.shopping.selectedDays || [];
     const pruned = prevSelected.filter((d) => windowSet.has(d));
     if (pruned.length !== prevSelected.length) MealStore.setShoppingDays(pruned);
-    const selected = new Set((MealStore.get().shopping.selectedDays || []).filter((d) => windowSet.has(d)));
+
+    // Restore confirmed if we already had days (e.g. after sync / revisit tab)
+    const selectedNow = MealStore.get().shopping.selectedDays || [];
+    if (!prepDaysConfirmed && selectedNow.length) prepDaysConfirmed = true;
+
+    const selected = new Set(selectedNow.filter((d) => windowSet.has(d)));
 
     const pick = $("#shop-day-pick");
     if (pick) {
@@ -1064,10 +1096,9 @@
           meta.label +
           (meta.isToday ? " · vandaag" : "") +
           (hasMeal ? "" : " (leeg)");
+        // Only local UI until "Bevestig dagen"
         lab.querySelector("input").addEventListener("change", () => {
-          const days = $$("#shop-day-pick input:checked").map((x) => x.value);
-          MealStore.setShoppingDays(days);
-          renderPrepList();
+          updatePrepDaysUi();
         });
         pick.appendChild(lab);
       });
@@ -1099,8 +1130,11 @@
       }
     }
 
-    renderPrepList();
-    renderHomeList();
+    updatePrepDaysUi();
+    if (prepDaysConfirmed) {
+      renderPrepList();
+      renderHomeList();
+    }
   }
 
   function renderPrepList() {
@@ -1109,29 +1143,39 @@
     const summary = $("#prep-summary");
     if (!host) return;
     host.innerHTML = "";
+
+    // Drop pending flags for keys no longer in list
+    const keys = new Set(items.map((i) => i.key));
+    Object.keys(prepHomePending).forEach((k) => {
+      if (!keys.has(k)) delete prepHomePending[k];
+    });
+
     const days = (MealStore.get().shopping.selectedDays || []).length;
     const backlog = MealStore.getBacklog().length;
     const cartN = MealStore.getCart().length;
+    const pendingN = Object.keys(prepHomePending).filter((k) => prepHomePending[k]).length;
 
     if (summary) {
       summary.textContent =
         items.length +
-        " te regelen" +
+        " items" +
+        (pendingN ? " · " + pendingN + " afgevinkt (thuis)" : "") +
         (days ? " · " + days + " dagen" : "") +
         (backlog ? " · " + backlog + " openstaand vorige trip" : "") +
-        (cartN ? " · " + cartN + " al in winkelmandje" : "") +
-        " · tik = markeer thuis";
+        (cartN ? " · " + cartN + " al in mandje" : "") +
+        " · tik = afvinken, daarna “Ligt thuis”";
     }
 
     if (!items.length) {
       host.innerHTML =
-        '<div class="empty-state"><div class="big">📋</div>Niets open. Kies dagen, voeg extra’s toe, of alles staat al thuis / in het mandje.</div>';
+        '<div class="empty-state"><div class="big">📋</div>Niets open. Voeg extra’s toe, of alles staat al thuis / in het mandje.</div>';
       return;
     }
 
     items.forEach((item) => {
+      const marked = !!prepHomePending[item.key];
       const row = document.createElement("div");
-      row.className = "check-item";
+      row.className = "check-item" + (marked ? " done" : "");
       row.style.cursor = "pointer";
       const badge =
         item.kind === "extra"
@@ -1140,8 +1184,9 @@
             ? ' <span style="color:var(--warn,#c45);font-size:0.72rem">OPEN</span>'
             : "";
       row.innerHTML =
-        '<div class="check-box" title="Markeer thuis">🏠</div>' +
-        '<div style="flex:1;min-width:0"><div class="name">' +
+        '<div class="check-box">' +
+        (marked ? "✓" : "") +
+        '</div><div style="flex:1;min-width:0"><div class="name">' +
         escapeHtml(item.name) +
         badge +
         '</div><div class="qty">' +
@@ -1149,19 +1194,10 @@
         (item.sources && item.sources.length ? " · " + escapeHtml(item.sources.slice(0, 3).join(", ")) : "") +
         "</div></div>";
       row.addEventListener("click", () => {
-        if (
-          !confirm(
-            "“" +
-              item.name +
-              "” markeren als thuis?\n\nJa = niet kopen (ligt al in huis).\nNee = annuleer."
-          )
-        ) {
-          return;
-        }
-        MealStore.markPrepItemHome(item.key, { name: item.name, unit: item.unit, qty: item.qty });
-        toast(item.name + " → thuis");
+        // Toggle only — no confirm popup
+        if (prepHomePending[item.key]) delete prepHomePending[item.key];
+        else prepHomePending[item.key] = true;
         renderPrepList();
-        renderHomeList();
       });
       host.appendChild(row);
     });
@@ -1460,10 +1496,33 @@ create policy "meal_calendar_write"
       });
     }
 
+    const btnConfirmDays = $("#btn-confirm-days");
+    if (btnConfirmDays) {
+      btnConfirmDays.addEventListener("click", () => {
+        const days = getDayPickChecked();
+        const hasExtras = (MealStore.get().shopping.extras || []).length > 0;
+        const hasBacklog = MealStore.getBacklog().length > 0;
+        if (!days.length && !hasExtras && !hasBacklog) {
+          toast("Selecteer minstens één dag met maaltijden");
+          return;
+        }
+        MealStore.setShoppingDays(days);
+        prepDaysConfirmed = true;
+        prepHomePending = {};
+        toast(days.length ? days.length + " dag(en) bevestigd" : "Lijst geopend (extra’s/openstaand)");
+        renderPrep();
+      });
+    }
+
     const btnClearDays = $("#btn-clear-days");
     if (btnClearDays) {
       btnClearDays.addEventListener("click", () => {
         MealStore.setShoppingDays([]);
+        prepDaysConfirmed = false;
+        prepHomePending = {};
+        $$("#shop-day-pick input").forEach((inp) => {
+          inp.checked = false;
+        });
         renderPrep();
         toast("Dagen gewist");
       });
@@ -1498,16 +1557,54 @@ create policy "meal_calendar_write"
       });
     }
 
+    const btnConfirmHome = $("#btn-confirm-home");
+    if (btnConfirmHome) {
+      btnConfirmHome.addEventListener("click", () => {
+        const keys = Object.keys(prepHomePending).filter((k) => prepHomePending[k]);
+        if (!keys.length) {
+          toast("Vink eerst items af die al thuis liggen");
+          return;
+        }
+        const prep = MealStore.getPrepList();
+        const byKey = new Map(prep.map((p) => [p.key, p]));
+        keys.forEach((key) => {
+          const item = byKey.get(key);
+          MealStore.markPrepItemHome(key, item ? { name: item.name, unit: item.unit, qty: item.qty } : null);
+        });
+        prepHomePending = {};
+        toast(keys.length + " item(s) → thuis");
+        renderPrepList();
+        renderHomeList();
+      });
+    }
+
     const btnTransfer = $("#btn-transfer-cart");
     if (btnTransfer) {
       btnTransfer.addEventListener("click", () => {
+        // First commit any pending "home" checks so they don't go to cart
+        const pendingKeys = Object.keys(prepHomePending).filter((k) => prepHomePending[k]);
+        if (pendingKeys.length) {
+          const go = confirm(
+            pendingKeys.length +
+              " item(s) zijn afgevinkt als thuis maar nog niet bevestigd.\n\nOK = eerst als thuis opslaan, rest naar winkel\nAnnuleren = stop"
+          );
+          if (!go) return;
+          const prepAll = MealStore.getPrepList();
+          const byKey = new Map(prepAll.map((p) => [p.key, p]));
+          pendingKeys.forEach((key) => {
+            const item = byKey.get(key);
+            MealStore.markPrepItemHome(key, item ? { name: item.name, unit: item.unit, qty: item.qty } : null);
+          });
+          prepHomePending = {};
+        }
+
         const prep = MealStore.getPrepList();
         if (!prep.length) {
-          toast("Niets om over te zetten");
+          toast("Niets om over te zetten (alles thuis of leeg)");
+          renderPrepList();
           return;
         }
         const cartN = MealStore.getCart().length;
-        let mode = "merge";
         if (cartN > 0) {
           const choice = confirm(
             "Mandje heeft al " +
@@ -1515,10 +1612,10 @@ create policy "meal_calendar_write"
               " items.\n\nOK = aanvullen (samenvoegen)\nAnnuleren = stop\n\n(Wil je vervangen? Wis eerst de hele lijst in Winkel.)"
           );
           if (!choice) return;
-          mode = "merge";
         }
-        const n = MealStore.transferPrepToCart(mode);
+        const n = MealStore.transferPrepToCart("merge");
         toast(n + " items in boodschappenlijst");
+        prepHomePending = {};
         renderPrep();
         renderCart();
         switchTab("cart");
