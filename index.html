@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="nl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"
+    />
+    <meta name="theme-color" content="#c2410c" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Eetkalender" />
+    <title>Eetkalender</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icons/icon-180.png" />
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body>
+    <!-- PIN gate -->
+    <section id="screen-pin" class="active" aria-label="Pincode">
+      <div class="pin-card">
+        <div class="pin-logo" aria-hidden="true">🍽️</div>
+        <h1>Eetkalender</h1>
+        <p>Voer de gedeelde pincode in</p>
+        <div class="pin-dots" aria-hidden="true">
+          <span class="pin-dot"></span>
+          <span class="pin-dot"></span>
+          <span class="pin-dot"></span>
+          <span class="pin-dot"></span>
+          <span class="pin-dot"></span>
+          <span class="pin-dot"></span>
+          <span class="pin-dot"></span>
+          <span class="pin-dot"></span>
+        </div>
+        <div class="pin-pad">
+          <button type="button" class="pin-key" data-key="1">1</button>
+          <button type="button" class="pin-key" data-key="2">2</button>
+          <button type="button" class="pin-key" data-key="3">3</button>
+          <button type="button" class="pin-key" data-key="4">4</button>
+          <button type="button" class="pin-key" data-key="5">5</button>
+          <button type="button" class="pin-key" data-key="6">6</button>
+          <button type="button" class="pin-key" data-key="7">7</button>
+          <button type="button" class="pin-key" data-key="8">8</button>
+          <button type="button" class="pin-key" data-key="9">9</button>
+          <button type="button" class="pin-key ghost" data-key="del">⌫</button>
+          <button type="button" class="pin-key" data-key="0">0</button>
+          <button type="button" class="pin-key ghost" data-key="ok">OK</button>
+        </div>
+        <p class="pin-error" id="pin-error"></p>
+      </div>
+    </section>
+
+    <div id="app-shell" class="hidden">
+      <header class="app-header">
+        <div>
+          <h1 id="header-title">Eetkalender</h1>
+          <p class="sub" id="header-sub">Wat eten we?</p>
+        </div>
+        <button type="button" class="icon-btn" id="btn-lock" title="Vergrendel" aria-label="Vergrendel">
+          🔒
+        </button>
+      </header>
+
+      <!-- Calendar -->
+      <section class="screen active" data-tab="calendar" id="tab-calendar">
+        <div class="chip-row" id="cal-mode-chips">
+          <button type="button" class="chip active" data-cal-mode="week" id="chip-week">Week</button>
+          <button type="button" class="chip" data-cal-mode="month" id="chip-month">Maand</button>
+          <button type="button" class="chip" id="btn-this-week">Vandaag</button>
+        </div>
+        <div class="week-nav">
+          <button type="button" class="icon-btn" id="btn-prev-week" aria-label="Vorige">‹</button>
+          <div class="label" id="week-label">Week</div>
+          <button type="button" class="icon-btn" id="btn-next-week" aria-label="Volgende">›</button>
+        </div>
+        <div id="day-list"></div>
+        <div id="month-list" class="hidden"></div>
+      </section>
+
+      <!-- Recipes -->
+      <section class="screen" data-tab="recipes" id="tab-recipes">
+        <div class="search-bar">
+          <input type="search" id="recipe-search" placeholder="Zoek recepten…" enterkeyhint="search" />
+          <button type="button" class="btn btn-primary" id="btn-new-recipe">+</button>
+        </div>
+        <div id="recipe-list"></div>
+      </section>
+
+      <!-- Shopping -->
+      <section class="screen" data-tab="shopping" id="tab-shopping">
+        <p style="margin: 0 0 8px; color: var(--muted); font-size: 0.92rem">
+          Vink dagen aan om een boodschappenlijst te maken. Tik op items om af te vinken.
+        </p>
+        <div class="day-pick" id="shop-day-pick"></div>
+        <div class="btn-row" style="margin-bottom: 12px">
+          <button type="button" class="btn btn-secondary" id="btn-clear-checks">Afvinkingen wissen</button>
+        </div>
+        <p id="shop-summary" class="meta" style="color: var(--muted); font-size: 0.88rem; margin: 0 0 10px"></p>
+        <div id="shop-list"></div>
+      </section>
+
+      <!-- Settings -->
+      <section class="screen" data-tab="settings" id="tab-settings">
+        <div class="settings-card">
+          <h3>Sync-status</h3>
+          <p>Lokale data staat op dit toestel. Koppel Supabase hieronder om te delen tussen telefoons.</p>
+          <span class="status-pill warn" id="sync-status">Lokale modus</span>
+          <p id="app-version-label" style="margin: 8px 0 0; color: var(--muted); font-size: 0.8rem"></p>
+          <div class="btn-row" style="margin-top: 10px">
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-sync-now">Nu syncen</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-check-update">App updaten</button>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <h3>Supabase cloud (multi-user)</h3>
+          <p>
+            1) Project maken op supabase.com · 2) SQL plakken · 3) URL + anon key hier invullen.
+          </p>
+          <div class="btn-row" style="margin-bottom: 10px">
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-open-supabase">Open dashboard</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-copy-sql">Kopieer SQL</button>
+          </div>
+          <div class="field">
+            <label>Project URL</label>
+            <input id="sb-url" type="url" placeholder="https://xxxx.supabase.co" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label>anon public key</label>
+            <textarea id="sb-key" rows="3" placeholder="Plak hier je echte key (begint met eyJ… of sb_publishable_…)" autocomplete="off"></textarea>
+          </div>
+          <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 0.92rem">
+            <input type="checkbox" id="sb-enabled" checked /> Cloud sync aanzetten
+          </label>
+          <div class="btn-row">
+            <button type="button" class="btn btn-secondary" id="btn-sb-test">Test verbinding</button>
+            <button type="button" class="btn btn-primary" id="btn-sb-save">Opslaan &amp; verbinden</button>
+          </div>
+          <p id="sb-help" style="margin: 10px 0 0; color: var(--muted); font-size: 0.85rem"></p>
+        </div>
+
+        <div class="settings-card" id="share-card">
+          <h3>Deel met partner</h3>
+          <p>
+            <strong>Belangrijk:</strong> de app moet op een <em>publieke</em> https-site staan (bv. Netlify),
+            niet op je werk-PC of Tesla-netwerk. Zie <code>HOSTING.md</code>.
+          </p>
+          <div class="field">
+            <label>Publieke app-URL (na hosting)</label>
+            <input
+              id="public-app-url"
+              type="url"
+              placeholder="https://jouw-app.netlify.app"
+              autocomplete="off"
+            />
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-save-public-url" style="margin-bottom: 10px">
+            Publieke URL opslaan
+          </button>
+          <p>
+            Daarna: deellink maken. Partner opent die (wifi of 4G), vult de pincode in, en is gekoppeld — PC mag uit.
+          </p>
+          <button type="button" class="btn btn-accent btn-block" id="btn-share-partner">
+            🔗 Deellink maken
+          </button>
+          <div id="share-result" class="share-result hidden">
+            <label class="field" style="margin-top: 12px">
+              <span>Deellink</span>
+              <textarea id="share-link" rows="3" readonly></textarea>
+            </label>
+            <div class="btn-row">
+              <button type="button" class="btn btn-primary" id="btn-share-copy">Kopieer link</button>
+              <button type="button" class="btn btn-secondary" id="btn-share-native">Deel…</button>
+            </div>
+            <p id="share-hint" class="share-hint"></p>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <h3>Pincode</h3>
+          <p>Gedeelde code voor iedereen die de app gebruikt.</p>
+          <button type="button" class="btn btn-secondary" id="btn-change-pin">Pincode wijzigen</button>
+        </div>
+
+        <div class="settings-card">
+          <h3>Backup</h3>
+          <p>Exporteer of importeer alle recepten en planning als JSON-bestand.</p>
+          <div class="btn-row">
+            <button type="button" class="btn btn-secondary" id="btn-export">Exporteer</button>
+            <button type="button" class="btn btn-secondary" id="btn-import">Importeer</button>
+            <input type="file" id="import-file" accept="application/json,.json" class="hidden" />
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <h3>Voorbeelddata</h3>
+          <p>Laad demo-recepten en een voorbeeldweek (overschrijft lokale data).</p>
+          <button type="button" class="btn btn-secondary" id="btn-demo">Demo laden</button>
+        </div>
+
+        <div class="settings-card">
+          <h3>Op je telefoon</h3>
+          <p>
+            <strong>iPhone:</strong> Deel → Zet op beginscherm<br />
+            <strong>Android:</strong> Menu → App installeren / Toevoegen aan startscherm
+          </p>
+        </div>
+      </section>
+    </div>
+
+    <nav class="bottom-nav" aria-label="Hoofdmenu">
+      <button type="button" class="nav-item active" data-tab="calendar">
+        <span class="ico">📅</span>
+        <span>Kalender</span>
+      </button>
+      <button type="button" class="nav-item" data-tab="recipes">
+        <span class="ico">📖</span>
+        <span>Recepten</span>
+      </button>
+      <button type="button" class="nav-item" data-tab="shopping">
+        <span class="ico">🛒</span>
+        <span>Boodschappen</span>
+      </button>
+      <button type="button" class="nav-item" data-tab="settings">
+        <span class="ico">⚙️</span>
+        <span>Instellingen</span>
+      </button>
+    </nav>
+
+    <!-- Bottom sheet -->
+    <div class="overlay" id="overlay" role="dialog" aria-modal="true">
+      <div class="sheet">
+        <div class="sheet-handle"></div>
+        <div class="sheet-head">
+          <h2 id="sheet-title">Detail</h2>
+          <button type="button" class="icon-btn" id="sheet-close" aria-label="Sluiten">✕</button>
+        </div>
+        <div id="sheet-body"></div>
+        <div id="sheet-actions"></div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status"></div>
+
+    <!-- Optional Supabase client (only used if enabled in config.js) -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="config.js"></script>
+    <script src="js/store.js"></script>
+    <script src="js/sync.js"></script>
+    <script src="js/app.js"></script>
+    <script>
+      // App-versie: verhoog bij releases (zichtbaar in Instellingen)
+      window.MEAL_APP_VERSION = "2026.08.25-5";
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("./sw.js").then((reg) => {
+            // Check regelmatig of er een nieuwe SW/code is (na mijn edits)
+            setInterval(() => reg.update().catch(() => {}), 60 * 1000);
+            reg.addEventListener("updatefound", () => {
+              const nw = reg.installing;
+              if (!nw) return;
+              nw.addEventListener("statechange", () => {
+                if (nw.state === "installed" && navigator.serviceWorker.controller) {
+                  window.dispatchEvent(new CustomEvent("meal-app-update"));
+                }
+              });
+            });
+          }).catch(() => {});
+          // Nieuwere SW overgenomen → één keer herladen
+          let refreshing = false;
+          navigator.serviceWorker.addEventListener("controllerchange", () => {
+            if (refreshing) return;
+            refreshing = true;
+            location.reload();
+          });
+        });
+      }
+    </script>
+  </body>
+</html>
