@@ -812,8 +812,9 @@
     ]);
   }
 
-  /* ---------- Recipes ---------- */
+  /* ---------- Recipes + presets ---------- */
   let recipeFilters = { minKcal: "", maxKcal: "", minStars: "", lastPlanned: "any" };
+  let recipesMode = "recipes"; // 'recipes' | 'presets'
 
   function getRecipeFiltersFromDom() {
     return {
@@ -824,7 +825,24 @@
     };
   }
 
+  function setRecipesMode(mode) {
+    recipesMode = mode === "presets" ? "presets" : "recipes";
+    const rp = $("#recipes-panel");
+    const pp = $("#presets-panel");
+    if (rp) rp.classList.toggle("hidden", recipesMode !== "recipes");
+    if (pp) pp.classList.toggle("hidden", recipesMode !== "presets");
+    $$("[data-recipes-mode]").forEach((c) => {
+      c.classList.toggle("active", c.getAttribute("data-recipes-mode") === recipesMode);
+    });
+    if (recipesMode === "recipes") renderRecipeListOnly();
+    else renderPresetList();
+  }
+
   function renderRecipes() {
+    setRecipesMode(recipesMode);
+  }
+
+  function renderRecipeListOnly() {
     const host = $("#recipe-list");
     if (!host) return;
     recipeFilters = getRecipeFiltersFromDom();
@@ -870,6 +888,71 @@
       btn.addEventListener("click", () => openRecipeEditor(r.id));
       host.appendChild(btn);
     });
+  }
+
+  function renderPresetList() {
+    const host = $("#preset-list");
+    if (!host) return;
+    const list = MealStore.getShopPresets();
+    host.innerHTML = "";
+    if (!list.length) {
+      host.innerHTML =
+        '<div class="empty-state"><div class="big">🧺</div>Geen standaard extra’s.<br/>Voeg items toe of herstel de standaardlijst.</div>';
+      return;
+    }
+    list.forEach((p) => {
+      const row = document.createElement("div");
+      row.className = "check-item";
+      row.innerHTML =
+        '<div style="flex:1;min-width:0"><div class="name">' +
+        escapeHtml(p.name) +
+        '</div><div class="qty">' +
+        escapeHtml(p.unit || "—") +
+        '</div></div>' +
+        '<button type="button" class="btn btn-sm btn-secondary" data-edit-preset="' +
+        escapeAttr(p.id) +
+        '">✎</button>' +
+        '<button type="button" class="btn btn-sm btn-ghost" data-del-preset="' +
+        escapeAttr(p.id) +
+        '">🗑</button>';
+      row.querySelector("[data-edit-preset]").addEventListener("click", () => openPresetEditor(p));
+      row.querySelector("[data-del-preset]").addEventListener("click", () => {
+        if (!confirm("“" + p.name + "” verwijderen uit standaard extra’s?")) return;
+        MealStore.removeShopPreset(p.id);
+        toast("Verwijderd");
+        renderPresetList();
+      });
+      host.appendChild(row);
+    });
+  }
+
+  function openPresetEditor(preset) {
+    const wrap = document.createElement("div");
+    wrap.innerHTML =
+      '<div class="field"><label>Naam</label><input id="pe-name" value="' +
+      escapeAttr(preset.name) +
+      '" /></div>' +
+      '<div class="field"><label>Eenheid</label><input id="pe-unit" value="' +
+      escapeAttr(preset.unit || "") +
+      '" placeholder="bv. fles, pak, kg" /></div>';
+    openSheet("Extra bewerken", wrap, [
+      {
+        label: "Opslaan",
+        className: "btn-primary",
+        action: () => {
+          const name = $("#pe-name", wrap).value;
+          const unit = $("#pe-unit", wrap).value;
+          if (!String(name).trim()) {
+            toast("Naam verplicht");
+            return;
+          }
+          MealStore.updateShopPreset(preset.id, { name, unit });
+          toast("Opgeslagen");
+          renderPresetList();
+        },
+      },
+      { label: "Annuleer", className: "btn-secondary", action: () => {} },
+    ]);
   }
 
   function openRecipeEditor(id, onSaved) {
@@ -1133,7 +1216,6 @@
     updatePrepDaysUi();
     if (prepDaysConfirmed) {
       renderPrepList();
-      renderHomeList();
     }
   }
 
@@ -1199,34 +1281,6 @@
         else prepHomePending[item.key] = true;
         renderPrepList();
       });
-      host.appendChild(row);
-    });
-  }
-
-  function renderHomeList() {
-    const host = $("#home-list");
-    if (!host) return;
-    const home = MealStore.getHomeList();
-    host.innerHTML = "";
-    if (!home.length) {
-      host.innerHTML = '<p style="color:var(--muted);font-size:0.85rem;margin:0">Nog geen voorraad gemarkeerd.</p>';
-      return;
-    }
-    home.forEach((h) => {
-      const row = document.createElement("div");
-      row.className = "check-item done";
-      const until =
-        h.stickyHome
-          ? "manueel thuis"
-          : h.coveredUntilDays && h.coveredUntilDays.length
-            ? "tot dagen: " + h.coveredUntilDays.join(", ")
-            : "thuis";
-      row.innerHTML =
-        '<div class="check-box">✓</div><div style="flex:1"><div class="name">' +
-        escapeHtml(h.name) +
-        '</div><div class="qty">' +
-        escapeHtml(until) +
-        "</div></div>";
       host.appendChild(row);
     });
   }
@@ -1472,17 +1526,47 @@ create policy "meal_calendar_write"
       });
     }
 
+    $$("[data-recipes-mode]").forEach((chip) => {
+      chip.addEventListener("click", () => setRecipesMode(chip.getAttribute("data-recipes-mode")));
+    });
+
     $("#recipe-search").addEventListener("input", (e) => {
       recipeQuery = e.target.value;
-      renderRecipes();
+      renderRecipeListOnly();
     });
     $("#btn-new-recipe").addEventListener("click", () => openRecipeEditor(null));
+
+    const btnAddPreset = $("#btn-add-preset");
+    if (btnAddPreset) {
+      btnAddPreset.addEventListener("click", () => {
+        const name = ($("#preset-name") && $("#preset-name").value) || "";
+        const unit = ($("#preset-unit") && $("#preset-unit").value) || "";
+        if (!String(name).trim()) {
+          toast("Geef een naam");
+          return;
+        }
+        MealStore.addShopPreset({ name, unit });
+        if ($("#preset-name")) $("#preset-name").value = "";
+        if ($("#preset-unit")) $("#preset-unit").value = "";
+        toast("Toegevoegd aan standaard extra’s");
+        renderPresetList();
+      });
+    }
+    const btnResetPresets = $("#btn-reset-presets");
+    if (btnResetPresets) {
+      btnResetPresets.addEventListener("click", () => {
+        if (!confirm("Standaardlijst herstellen? Jouw aanpassingen gaan verloren.")) return;
+        MealStore.resetShopPresets();
+        toast("Standaardlijst hersteld");
+        renderPresetList();
+      });
+    }
 
     ["flt-kcal-min", "flt-kcal-max", "flt-stars", "flt-planned"].forEach((id) => {
       const el = document.getElementById(id);
       if (!el) return;
-      el.addEventListener("change", () => renderRecipes());
-      el.addEventListener("input", () => renderRecipes());
+      el.addEventListener("change", () => renderRecipeListOnly());
+      el.addEventListener("input", () => renderRecipeListOnly());
     });
     const btnClrFlt = $("#btn-clear-recipe-filters");
     if (btnClrFlt) {
@@ -1491,7 +1575,7 @@ create policy "meal_calendar_write"
         if ($("#flt-kcal-max")) $("#flt-kcal-max").value = "";
         if ($("#flt-stars")) $("#flt-stars").value = "";
         if ($("#flt-planned")) $("#flt-planned").value = "any";
-        renderRecipes();
+        renderRecipeListOnly();
         toast("Filters gewist");
       });
     }
@@ -1574,7 +1658,6 @@ create policy "meal_calendar_write"
         prepHomePending = {};
         toast(keys.length + " item(s) → thuis");
         renderPrepList();
-        renderHomeList();
       });
     }
 
@@ -1619,16 +1702,6 @@ create policy "meal_calendar_write"
         renderPrep();
         renderCart();
         switchTab("cart");
-      });
-    }
-
-    const btnClearHome = $("#btn-clear-home");
-    if (btnClearHome) {
-      btnClearHome.addEventListener("click", () => {
-        if (!confirmTwice("Alle thuis-voorraad wissen?", "Echt alle voorraad-markeringen wissen?")) return;
-        MealStore.clearHomeStock();
-        renderPrep();
-        toast("Voorraad gewist");
       });
     }
 

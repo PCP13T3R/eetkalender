@@ -149,6 +149,7 @@
         backlog: [], // not taken from last trip {id,key,name,qty,unit,sources}
         cart: [], // active basket {id,key,name,qty,unit,sources,checked,tripDays}
         home: [], // {id,key,name,qty,unit,stickyHome,coveredUntilDays,confirmedAt}
+        shopPresets: null, // null = use DEFAULT_SHOP_PRESETS; else [{id,name,unit}]
         checked: {}, // legacy
         generatedAt: null,
       },
@@ -235,6 +236,8 @@
     if (!Array.isArray(s.cart)) s.cart = [];
     if (!Array.isArray(s.home)) s.home = [];
     if (!s.checked) s.checked = {};
+    // shopPresets: null/missing = defaults; array = custom (may be empty)
+    if (s.shopPresets != null && !Array.isArray(s.shopPresets)) s.shopPresets = null;
   }
 
   function replaceState(next, { unlock = false, silent = false } = {}) {
@@ -605,7 +608,7 @@
       .replace(/\s+/g, " ");
   }
 
-  const SHOP_PRESETS = [
+  const DEFAULT_SHOP_PRESETS = [
     { name: "WC-papier", unit: "pak" },
     { name: "Keukenpapier", unit: "rol" },
     { name: "Vuilniszakken", unit: "rol" },
@@ -804,8 +807,75 @@
     persist();
   }
 
+  function cloneDefaultPresets() {
+    return DEFAULT_SHOP_PRESETS.map((p, i) => ({
+      id: "def-" + i + "-" + normalizeIngredientName(p.name).replace(/\s+/g, "-"),
+      name: p.name,
+      unit: p.unit || "",
+    }));
+  }
+
+  /** Materialize custom list on first edit so it syncs; until then use defaults (not in cloud). */
+  function materializeShopPresets() {
+    migrateShopping(state.shopping);
+    if (!Array.isArray(state.shopping.shopPresets)) {
+      state.shopping.shopPresets = cloneDefaultPresets();
+    }
+    return state.shopping.shopPresets;
+  }
+
   function getShopPresets() {
-    return SHOP_PRESETS.slice();
+    migrateShopping(state.shopping);
+    const src = Array.isArray(state.shopping.shopPresets)
+      ? state.shopping.shopPresets
+      : cloneDefaultPresets();
+    return src.map((p) => ({
+      id: p.id,
+      name: p.name,
+      unit: p.unit || "",
+    }));
+  }
+
+  function addShopPreset(item) {
+    const list = materializeShopPresets();
+    const name = String(item.name || "").trim();
+    if (!name) return null;
+    const row = {
+      id: uid(),
+      name,
+      unit: String(item.unit || "").trim(),
+    };
+    list.push(row);
+    list.sort((a, b) => a.name.localeCompare(b.name, "nl"));
+    persist();
+    return row.id;
+  }
+
+  function updateShopPreset(id, patch) {
+    const list = materializeShopPresets();
+    const row = list.find((p) => p.id === id);
+    if (!row) return false;
+    if (patch.name != null) {
+      const n = String(patch.name).trim();
+      if (!n) return false;
+      row.name = n;
+    }
+    if (patch.unit != null) row.unit = String(patch.unit).trim();
+    list.sort((a, b) => a.name.localeCompare(b.name, "nl"));
+    persist();
+    return true;
+  }
+
+  function removeShopPreset(id) {
+    const list = materializeShopPresets();
+    state.shopping.shopPresets = list.filter((p) => p.id !== id);
+    persist();
+  }
+
+  function resetShopPresets() {
+    migrateShopping(state.shopping);
+    state.shopping.shopPresets = cloneDefaultPresets();
+    persist();
   }
 
   function addShoppingExtra(item) {
@@ -1136,6 +1206,10 @@
     toggleShoppingCheck,
     clearShoppingChecks,
     getShopPresets,
+    addShopPreset,
+    updateShopPreset,
+    removeShopPreset,
+    resetShopPresets,
     addShoppingExtra,
     removeShoppingExtra,
     clearShoppingExtras,
