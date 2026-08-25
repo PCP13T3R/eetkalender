@@ -149,7 +149,8 @@
     $$(".nav-item").forEach((n) => n.classList.toggle("active", n.dataset.tab === tab));
     if (tab === "calendar") renderCalendar();
     if (tab === "recipes") renderRecipes();
-    if (tab === "shopping") renderShopping();
+    if (tab === "prep") renderPrep();
+    if (tab === "cart") renderCart();
     if (tab === "settings") renderSettings();
   }
 
@@ -535,8 +536,28 @@
   function openRecipePicker(dayIso, slot) {
     const wrap = document.createElement("div");
     wrap.innerHTML =
-      '<div class="search-bar"><input type="search" id="pick-search" placeholder="Zoek recept…" /></div><div class="pick-list" id="pick-list"></div>' +
+      '<div class="search-bar"><input type="search" id="pick-search" placeholder="Zoek recept…" /></div>' +
+      '<div class="settings-card" style="margin:10px 0;padding:10px">' +
+      '<div style="font-weight:700;font-size:0.85rem;margin-bottom:6px">Filters</div>' +
+      '<div class="filter-grid">' +
+      '<div class="field" style="margin:0"><label>Kcal min</label><input id="pick-kcal-min" type="number" min="0" placeholder="—" inputmode="numeric" /></div>' +
+      '<div class="field" style="margin:0"><label>Kcal max</label><input id="pick-kcal-max" type="number" min="0" placeholder="—" inputmode="numeric" /></div>' +
+      '<div class="field" style="margin:0"><label>Min. sterren</label><select id="pick-stars"><option value="">Alle</option><option value="1">★+</option><option value="2">★★+</option><option value="3">★★★+</option><option value="4">★★★★+</option><option value="5">★★★★★</option></select></div>' +
+      '<div class="field" style="margin:0"><label>Laatst gepland</label><select id="pick-planned"><option value="any">Alle</option><option value="never">Nog nooit</option><option value="7">≥ 7 d</option><option value="14">≥ 14 d</option><option value="30">≥ 30 d</option><option value="90">≥ 90 d</option></select></div>' +
+      "</div>" +
+      '<button type="button" class="btn btn-secondary btn-sm" id="pick-clear-flt" style="margin-top:8px">Filters wissen</button>' +
+      "</div>" +
+      '<div class="pick-list" id="pick-list"></div>' +
       '<button type="button" class="btn btn-primary btn-block" id="pick-new" style="margin-top:10px">+ Nieuw recept</button>';
+
+    function pickFilters() {
+      return {
+        minKcal: (wrap.querySelector("#pick-kcal-min") && wrap.querySelector("#pick-kcal-min").value) || "",
+        maxKcal: (wrap.querySelector("#pick-kcal-max") && wrap.querySelector("#pick-kcal-max").value) || "",
+        minStars: (wrap.querySelector("#pick-stars") && wrap.querySelector("#pick-stars").value) || "",
+        lastPlanned: (wrap.querySelector("#pick-planned") && wrap.querySelector("#pick-planned").value) || "any",
+      };
+    }
 
     function chooseRecipe(r) {
       const base = MealStore.getRecipeServingsBase(r);
@@ -587,22 +608,32 @@
 
     function fill(q) {
       const list = $("#pick-list", wrap);
-      const items = MealStore.listRecipes(q);
+      const items = MealStore.listRecipes(q, pickFilters());
       list.innerHTML = "";
       if (!items.length) {
-        list.innerHTML = '<div class="empty-state">Geen recepten</div>';
+        list.innerHTML = '<div class="empty-state">Geen recepten voor deze filters</div>';
         return;
       }
       items.forEach((r) => {
         const b = document.createElement("button");
         b.type = "button";
         const base = MealStore.getRecipeServingsBase(r);
+        const daysAgo = MealStore.daysSinceLastPlanned(r.id);
+        let ago = "nooit";
+        if (daysAgo === 0) ago = "vandaag";
+        else if (daysAgo === 1) ago = "gisteren";
+        else if (daysAgo != null) ago = daysAgo + "d geleden";
+        const kcal = MealStore.getRecipeKcalPerPerson(r);
         b.innerHTML =
           escapeHtml(r.name) +
           (r.rating ? " " + starsHtml(r.rating) : "") +
           ' <span style="color:var(--muted);font-weight:500">· ' +
           base +
-          "p</span>";
+          "p" +
+          (kcal != null ? " · " + kcal + " kcal" : "") +
+          " · " +
+          ago +
+          "</span>";
         b.addEventListener("click", () => chooseRecipe(r));
         list.appendChild(b);
       });
@@ -610,6 +641,19 @@
 
     fill("");
     wrap.querySelector("#pick-search").addEventListener("input", (e) => fill(e.target.value));
+    ["pick-kcal-min", "pick-kcal-max", "pick-stars", "pick-planned"].forEach((id) => {
+      const el = wrap.querySelector("#" + id);
+      if (!el) return;
+      el.addEventListener("change", () => fill(wrap.querySelector("#pick-search").value));
+      el.addEventListener("input", () => fill(wrap.querySelector("#pick-search").value));
+    });
+    wrap.querySelector("#pick-clear-flt").addEventListener("click", () => {
+      wrap.querySelector("#pick-kcal-min").value = "";
+      wrap.querySelector("#pick-kcal-max").value = "";
+      wrap.querySelector("#pick-stars").value = "";
+      wrap.querySelector("#pick-planned").value = "any";
+      fill(wrap.querySelector("#pick-search").value);
+    });
     wrap.querySelector("#pick-new").addEventListener("click", () => {
       openRecipeEditor(null, (savedId) => {
         if (savedId) {
@@ -960,8 +1004,7 @@
     openSheet(editingRecipeId ? "Recept bewerken" : "Nieuw recept", wrap, actions);
   }
 
-  /* ---------- Shopping ---------- */
-  /** Vandaag t.e.m. +7 dagen (bv. di 25 → di 1) */
+  /* ---------- Prep + Cart (shopping) ---------- */
   function shoppingDayRange() {
     const start = MealStore.todayISO();
     const days = [];
@@ -969,17 +1012,32 @@
     return days;
   }
 
-  function renderShopping() {
+  function prettyQty(n) {
+    if (n == null || Number.isNaN(n)) return "";
+    if (Number.isInteger(n)) return String(n);
+    return (Math.round(n * 100) / 100).toString();
+  }
+
+  function itemQtyText(item) {
+    if (item.qty != null && !Number.isNaN(Number(item.qty))) {
+      return prettyQty(Number(item.qty)) + (item.unit ? " " + item.unit : "");
+    }
+    return item.unit || "";
+  }
+
+  /** Dubbele bevestiging voor harde deletes */
+  function confirmTwice(msg1, msg2) {
+    if (!confirm(msg1)) return false;
+    return confirm(msg2 || "Echt zeker? Dit kan niet ongedaan.");
+  }
+
+  function renderPrep() {
     const state = MealStore.get();
     const windowDays = shoppingDayRange();
     const windowSet = new Set(windowDays);
-
-    // Drop selected days outside the rolling window
     const prevSelected = state.shopping.selectedDays || [];
     const pruned = prevSelected.filter((d) => windowSet.has(d));
-    if (pruned.length !== prevSelected.length) {
-      MealStore.setShoppingDays(pruned);
-    }
+    if (pruned.length !== prevSelected.length) MealStore.setShoppingDays(pruned);
     const selected = new Set((MealStore.get().shopping.selectedDays || []).filter((d) => windowSet.has(d)));
 
     const pick = $("#shop-day-pick");
@@ -1009,13 +1067,12 @@
         lab.querySelector("input").addEventListener("change", () => {
           const days = $$("#shop-day-pick input:checked").map((x) => x.value);
           MealStore.setShoppingDays(days);
-          renderShoppingList();
+          renderPrepList();
         });
         pick.appendChild(lab);
       });
     }
 
-    // Dropdown presets (rebuild each time so it's always current)
     const sel = $("#shop-preset-select");
     if (sel) {
       const cur = sel.value;
@@ -1037,96 +1094,174 @@
           MealStore.addShoppingExtra({ name: p.name, qty: 1, unit: p.unit || "" });
           toast(p.name + " toegevoegd");
           sel.value = "";
-          renderShoppingList();
+          renderPrepList();
         });
       }
     }
 
-    renderShoppingList();
+    renderPrepList();
+    renderHomeList();
   }
 
-  function renderShoppingList() {
-    const state = MealStore.get();
-    const days = state.shopping.selectedDays || [];
-    const items = MealStore.buildShoppingList(days);
-    const host = $("#shop-list");
-    const summary = $("#shop-summary");
+  function renderPrepList() {
+    const items = MealStore.getPrepList();
+    const host = $("#prep-list");
+    const summary = $("#prep-summary");
     if (!host) return;
     host.innerHTML = "";
+    const days = (MealStore.get().shopping.selectedDays || []).length;
+    const backlog = MealStore.getBacklog().length;
+    const cartN = MealStore.getCart().length;
 
-    const hasExtras = (state.shopping.extras || []).length > 0;
-    if (!days.length && !hasExtras) {
-      if (summary) summary.textContent = "Selecteer dagen en/of voeg extra’s toe.";
-      host.innerHTML =
-        '<div class="empty-state"><div class="big">🛒</div>Kies dagen met maaltijden of tik een snelle extra hierboven.</div>';
-      return;
-    }
-
-    const checked = state.shopping.checked || {};
-    const done = items.filter((i) => checked[i.key]).length;
-    const btnClearChecks = $("#btn-clear-checks");
-    if (btnClearChecks) {
-      btnClearChecks.classList.toggle("hidden", !(days && days.length));
-    }
     if (summary) {
       summary.textContent =
         items.length +
-        " items · " +
-        done +
-        " afgevinkt" +
-        (days.length ? " · " + days.length + " dagen" : "") +
-        (hasExtras ? " · extra’s inbegrepen" : "");
+        " te regelen" +
+        (days ? " · " + days + " dagen" : "") +
+        (backlog ? " · " + backlog + " openstaand vorige trip" : "") +
+        (cartN ? " · " + cartN + " al in winkelmandje" : "") +
+        " · tik = markeer thuis";
     }
 
     if (!items.length) {
-      host.innerHTML = '<div class="empty-state">Nog geen items.</div>';
+      host.innerHTML =
+        '<div class="empty-state"><div class="big">📋</div>Niets open. Kies dagen, voeg extra’s toe, of alles staat al thuis / in het mandje.</div>';
       return;
     }
 
     items.forEach((item) => {
-      const isDone = !!checked[item.key];
       const row = document.createElement("div");
-      row.className = "check-item" + (isDone ? " done" : "");
+      row.className = "check-item";
       row.style.cursor = "pointer";
-      const qtyText =
-        item.qty != null && !Number.isNaN(item.qty)
-          ? prettyQty(item.qty) + (item.unit ? " " + item.unit : "")
-          : item.unit || "";
+      const badge =
+        item.kind === "extra"
+          ? ' <span style="color:var(--accent);font-size:0.72rem">EXTRA</span>'
+          : item.kind === "backlog" || (item.sources || []).includes("Niet meegenomen")
+            ? ' <span style="color:var(--warn,#c45);font-size:0.72rem">OPEN</span>'
+            : "";
       row.innerHTML =
-        '<div class="check-box">' +
-        (isDone ? "✓" : "") +
-        '</div><div style="flex:1;min-width:0"><div class="name">' +
+        '<div class="check-box" title="Markeer thuis">🏠</div>' +
+        '<div style="flex:1;min-width:0"><div class="name">' +
         escapeHtml(item.name) +
-        (item.kind === "extra" ? ' <span style="color:var(--accent);font-size:0.75rem">EXTRA</span>' : "") +
+        badge +
         '</div><div class="qty">' +
-        escapeHtml(qtyText) +
-        (item.sources && item.sources.length ? " · " + escapeHtml(item.sources.join(", ")) : "") +
-        "</div></div>" +
-        (item.kind === "extra" && item.extraId
-          ? '<button type="button" class="btn btn-sm btn-ghost" data-rm-extra="' +
-            item.extraId +
-            '">✕</button>'
-          : "");
-      row.addEventListener("click", (e) => {
-        if (e.target.closest("[data-rm-extra]")) return;
-        MealStore.toggleShoppingCheck(item.key);
-        renderShoppingList();
+        escapeHtml(itemQtyText(item)) +
+        (item.sources && item.sources.length ? " · " + escapeHtml(item.sources.slice(0, 3).join(", ")) : "") +
+        "</div></div>";
+      row.addEventListener("click", () => {
+        if (
+          !confirm(
+            "“" +
+              item.name +
+              "” markeren als thuis?\n\nJa = niet kopen (ligt al in huis).\nNee = annuleer."
+          )
+        ) {
+          return;
+        }
+        MealStore.markPrepItemHome(item.key, { name: item.name, unit: item.unit, qty: item.qty });
+        toast(item.name + " → thuis");
+        renderPrepList();
+        renderHomeList();
       });
-      const rm = row.querySelector("[data-rm-extra]");
-      if (rm) {
-        rm.addEventListener("click", (e) => {
-          e.stopPropagation();
-          MealStore.removeShoppingExtra(rm.getAttribute("data-rm-extra"));
-          renderShoppingList();
-        });
-      }
       host.appendChild(row);
     });
   }
 
-  function prettyQty(n) {
-    if (Number.isInteger(n)) return String(n);
-    return (Math.round(n * 100) / 100).toString();
+  function renderHomeList() {
+    const host = $("#home-list");
+    if (!host) return;
+    const home = MealStore.getHomeList();
+    host.innerHTML = "";
+    if (!home.length) {
+      host.innerHTML = '<p style="color:var(--muted);font-size:0.85rem;margin:0">Nog geen voorraad gemarkeerd.</p>';
+      return;
+    }
+    home.forEach((h) => {
+      const row = document.createElement("div");
+      row.className = "check-item done";
+      const until =
+        h.stickyHome
+          ? "manueel thuis"
+          : h.coveredUntilDays && h.coveredUntilDays.length
+            ? "tot dagen: " + h.coveredUntilDays.join(", ")
+            : "thuis";
+      row.innerHTML =
+        '<div class="check-box">✓</div><div style="flex:1"><div class="name">' +
+        escapeHtml(h.name) +
+        '</div><div class="qty">' +
+        escapeHtml(until) +
+        "</div></div>";
+      host.appendChild(row);
+    });
+  }
+
+  function renderCart() {
+    const items = MealStore.getCart();
+    const host = $("#cart-list");
+    const summary = $("#cart-summary");
+    if (!host) return;
+    host.innerHTML = "";
+    const done = items.filter((i) => i.checked).length;
+    if (summary) {
+      summary.textContent = items.length
+        ? items.length + " in mandje · " + done + " in de kar · " + (items.length - done) + " nog te pakken"
+        : "Mandje leeg — ga naar Prep en transfer.";
+    }
+    if (!items.length) {
+      host.innerHTML =
+        '<div class="empty-state"><div class="big">🛒</div>Nog geen boodschappenlijst.<br/>Tab <strong>Prep</strong> → dagen kiezen → “Naar boodschappenlijst”.</div>';
+      return;
+    }
+    items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "check-item" + (item.checked ? " done" : "");
+      row.innerHTML =
+        '<div class="check-box" data-toggle="' +
+        item.id +
+        '">' +
+        (item.checked ? "✓" : "") +
+        '</div><div style="flex:1;min-width:0" data-toggle="' +
+        item.id +
+        '"><div class="name">' +
+        escapeHtml(item.name) +
+        '</div><div class="qty">' +
+        escapeHtml(itemQtyText(item)) +
+        (item.sources && item.sources.length ? " · " + escapeHtml(item.sources.slice(0, 2).join(", ")) : "") +
+        '</div></div><button type="button" class="btn btn-sm btn-ghost" data-del="' +
+        item.id +
+        '" title="Verwijderen">🗑</button>';
+      row.querySelectorAll("[data-toggle]").forEach((el) => {
+        el.style.cursor = "pointer";
+        el.addEventListener("click", () => {
+          MealStore.cartToggleCheck(item.id);
+          renderCart();
+        });
+      });
+      const del = row.querySelector("[data-del]");
+      del.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (
+          !confirmTwice(
+            "“" + item.name + "” definitief van de boodschappenlijst verwijderen?\n\nJa = verder · Nee = annuleer",
+            "Laatste bevestiging: “" + item.name + "” echt verwijderen?"
+          )
+        ) {
+          return;
+        }
+        MealStore.cartDeleteItem(item.id);
+        toast(item.name + " verwijderd");
+        renderCart();
+      });
+      host.appendChild(row);
+    });
+  }
+
+  // legacy name used elsewhere
+  function renderShopping() {
+    renderPrep();
+  }
+  function renderShoppingList() {
+    renderPrepList();
   }
 
   /* ---------- Settings ---------- */
@@ -1225,7 +1360,8 @@ create policy "meal_calendar_write"
   function renderAll() {
     renderCalendar();
     renderRecipes();
-    renderShopping();
+    renderPrep();
+    renderCart();
     renderSettings();
   }
 
@@ -1306,18 +1442,6 @@ create policy "meal_calendar_write"
     });
     $("#btn-new-recipe").addEventListener("click", () => openRecipeEditor(null));
 
-    const btnClearChecks = $("#btn-clear-checks");
-    if (btnClearChecks) {
-      btnClearChecks.addEventListener("click", () => {
-        if (!confirm("Afvinken van boodschappenlijst wissen?\n\nJa = alle vinkjes weg.\nNee = annuleer.")) {
-          return;
-        }
-        MealStore.clearShoppingChecks();
-        renderShoppingList();
-        toast("Afvinkingen gewist");
-      });
-    }
-
     ["flt-kcal-min", "flt-kcal-max", "flt-stars", "flt-planned"].forEach((id) => {
       const el = document.getElementById(id);
       if (!el) return;
@@ -1340,7 +1464,7 @@ create policy "meal_calendar_write"
     if (btnClearDays) {
       btnClearDays.addEventListener("click", () => {
         MealStore.setShoppingDays([]);
-        renderShopping();
+        renderPrep();
         toast("Dagen gewist");
       });
     }
@@ -1350,7 +1474,7 @@ create policy "meal_calendar_write"
       btnClearExtras.addEventListener("click", () => {
         if (!confirm("Alle extra boodschappen wissen?")) return;
         MealStore.clearShoppingExtras();
-        renderShoppingList();
+        renderPrepList();
         toast("Extra’s gewist");
       });
     }
@@ -1370,7 +1494,94 @@ create policy "meal_calendar_write"
         if ($("#extra-qty")) $("#extra-qty").value = "";
         if ($("#extra-unit")) $("#extra-unit").value = "";
         toast("Toegevoegd");
-        renderShoppingList();
+        renderPrepList();
+      });
+    }
+
+    const btnTransfer = $("#btn-transfer-cart");
+    if (btnTransfer) {
+      btnTransfer.addEventListener("click", () => {
+        const prep = MealStore.getPrepList();
+        if (!prep.length) {
+          toast("Niets om over te zetten");
+          return;
+        }
+        const cartN = MealStore.getCart().length;
+        let mode = "merge";
+        if (cartN > 0) {
+          const choice = confirm(
+            "Mandje heeft al " +
+              cartN +
+              " items.\n\nOK = aanvullen (samenvoegen)\nAnnuleren = stop\n\n(Wil je vervangen? Wis eerst de hele lijst in Winkel.)"
+          );
+          if (!choice) return;
+          mode = "merge";
+        }
+        const n = MealStore.transferPrepToCart(mode);
+        toast(n + " items in boodschappenlijst");
+        renderPrep();
+        renderCart();
+        switchTab("cart");
+      });
+    }
+
+    const btnClearHome = $("#btn-clear-home");
+    if (btnClearHome) {
+      btnClearHome.addEventListener("click", () => {
+        if (!confirmTwice("Alle thuis-voorraad wissen?", "Echt alle voorraad-markeringen wissen?")) return;
+        MealStore.clearHomeStock();
+        renderPrep();
+        toast("Voorraad gewist");
+      });
+    }
+
+    const btnComplete = $("#btn-complete-trip");
+    if (btnComplete) {
+      btnComplete.addEventListener("click", () => {
+        const cart = MealStore.getCart();
+        if (!cart.length) {
+          toast("Mandje is leeg");
+          return;
+        }
+        const checked = cart.filter((c) => c.checked).length;
+        const left = cart.length - checked;
+        if (
+          !confirm(
+            "Winkel afronden?\n\n" +
+              checked +
+              " meegenomen → thuis\n" +
+              left +
+              " niet meegenomen → terug naar Prep\n\nOK = afronden · Annuleren = stop"
+          )
+        ) {
+          return;
+        }
+        const res = MealStore.completeShoppingTrip();
+        toast(res.taken + " thuis · " + res.left + " openstaand");
+        renderCart();
+        renderPrep();
+        if (res.left > 0) switchTab("prep");
+      });
+    }
+
+    const btnCartClear = $("#btn-cart-clear-all");
+    if (btnCartClear) {
+      btnCartClear.addEventListener("click", () => {
+        if (!MealStore.getCart().length) {
+          toast("Mandje is al leeg");
+          return;
+        }
+        if (
+          !confirmTwice(
+            "Hele boodschappenlijst definitief verwijderen?\n\n(Dit is géén afronden — items gaan niet naar Prep.)",
+            "Laatste bevestiging: hele lijst echt wissen?"
+          )
+        ) {
+          return;
+        }
+        MealStore.cartClearAll();
+        renderCart();
+        toast("Lijst verwijderd");
       });
     }
 
@@ -1635,7 +1846,8 @@ create policy "meal_calendar_write"
       if (MealStore.get().unlocked) {
         if (currentTab === "calendar") renderCalendar();
         if (currentTab === "recipes") renderRecipes();
-        if (currentTab === "shopping") renderShopping();
+        if (currentTab === "prep") renderPrep();
+        if (currentTab === "cart") renderCart();
         if (currentTab === "settings") renderSettings();
       }
     });

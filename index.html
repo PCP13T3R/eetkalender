@@ -125,11 +125,11 @@
         <div id="recipe-list"></div>
       </section>
 
-      <!-- Shopping -->
-      <section class="screen" data-tab="shopping" id="tab-shopping">
-        <p style="margin: 0 0 8px; color: var(--muted); font-size: 0.92rem">
-          <strong>Selecteer dagen voor boodschappenlijst</strong>
-          (vandaag t.e.m. +7 dagen). Recepten × personen + extra’s.
+      <!-- Voorbereiden -->
+      <section class="screen" data-tab="prep" id="tab-prep">
+        <p style="margin: 0 0 8px; color: var(--muted); font-size: 0.9rem">
+          Kies dagen (vandaag–+7), voeg extra’s toe. Tik een item om te markeren als
+          <strong>thuis</strong>. Stuur de rest naar <strong>Boodschappen</strong>.
         </p>
         <div class="day-pick" id="shop-day-pick"></div>
         <div class="btn-row" style="margin-bottom: 12px">
@@ -137,14 +137,13 @@
         </div>
 
         <div class="settings-card" style="margin-bottom: 12px">
-          <h3 style="margin: 0 0 8px; font-size: 1rem">Extra boodschappen</h3>
+          <h3 style="margin: 0 0 8px; font-size: 1rem">Extra’s</h3>
           <div class="field" style="margin-bottom: 10px">
             <label for="shop-preset-select">Snel toevoegen</label>
             <select id="shop-preset-select" style="width: 100%; min-height: 46px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg-card); padding: 0 12px">
               <option value="">Kies een item…</option>
             </select>
           </div>
-          <p style="margin: 0 0 8px; color: var(--muted); font-size: 0.82rem">Of manueel:</p>
           <div class="ing-row" style="grid-template-columns: 1.4fr 0.6fr 0.7fr auto">
             <input id="extra-name" placeholder="Item" />
             <input id="extra-qty" placeholder="hoev." inputmode="decimal" />
@@ -153,12 +152,41 @@
           </div>
           <div class="btn-row" style="margin-top: 10px">
             <button type="button" class="btn btn-secondary btn-sm" id="btn-clear-extras">Extra’s wissen</button>
-            <button type="button" class="btn btn-secondary btn-sm hidden" id="btn-clear-checks">Afvinkingen wissen</button>
           </div>
         </div>
 
-        <p id="shop-summary" class="meta" style="color: var(--muted); font-size: 0.88rem; margin: 0 0 10px"></p>
-        <div id="shop-list"></div>
+        <p id="prep-summary" class="meta" style="color: var(--muted); font-size: 0.88rem; margin: 0 0 10px"></p>
+        <div id="prep-list"></div>
+        <div class="btn-row" style="margin-top: 14px; position: sticky; bottom: 8px">
+          <button type="button" class="btn btn-primary btn-block" id="btn-transfer-cart">
+            → Naar boodschappenlijst
+          </button>
+        </div>
+        <details style="margin-top: 16px" id="home-stock-details">
+          <summary style="cursor: pointer; color: var(--muted); font-size: 0.9rem">Thuis (voorraad)</summary>
+          <div id="home-list" style="margin-top: 8px"></div>
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-clear-home" style="margin-top: 8px">
+            Voorraad wissen
+          </button>
+        </details>
+      </section>
+
+      <!-- Boodschappen (mandje) -->
+      <section class="screen" data-tab="cart" id="tab-cart">
+        <p style="margin: 0 0 8px; color: var(--muted); font-size: 0.9rem">
+          In de winkel: afvinken = in de kar. Daarna <strong>Winkel afronden</strong>.
+          Verwijderen = echt weg (dubbele bevestiging).
+        </p>
+        <p id="cart-summary" class="meta" style="color: var(--muted); font-size: 0.88rem; margin: 0 0 10px"></p>
+        <div id="cart-list"></div>
+        <div class="btn-row" style="margin-top: 14px; flex-wrap: wrap; gap: 8px">
+          <button type="button" class="btn btn-primary btn-block" id="btn-complete-trip">
+            ✓ Winkel afronden
+          </button>
+          <button type="button" class="btn btn-secondary btn-block" id="btn-cart-clear-all">
+            Hele lijst verwijderen
+          </button>
+        </div>
       </section>
 
       <!-- Settings -->
@@ -279,13 +307,17 @@
         <span class="ico">📖</span>
         <span>Recepten</span>
       </button>
-      <button type="button" class="nav-item" data-tab="shopping">
+      <button type="button" class="nav-item" data-tab="prep">
+        <span class="ico">📋</span>
+        <span>Prep</span>
+      </button>
+      <button type="button" class="nav-item" data-tab="cart">
         <span class="ico">🛒</span>
-        <span>Boodschappen</span>
+        <span>Winkel</span>
       </button>
       <button type="button" class="nav-item" data-tab="settings">
         <span class="ico">⚙️</span>
-        <span>Instellingen</span>
+        <span>Meer</span>
       </button>
     </nav>
 
@@ -312,7 +344,7 @@
     <script src="js/app.js"></script>
     <script>
       // App-versie: verhoog bij releases (zichtbaar in Instellingen)
-      window.MEAL_APP_VERSION = "2026.08.25-12";
+      window.MEAL_APP_VERSION = "2026.08.25-13";
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {
           navigator.serviceWorker.register("./sw.js").then((reg) => {

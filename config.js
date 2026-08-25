@@ -1,4 +1,4 @@
-﻿// Eetkalender — GitHub Pages build
+﻿// Eetkalender configuratie (lokaal)
 window.MEAL_CONFIG = {
   appName: "Eetkalender",
   defaultPin: "834883",
@@ -6,9 +6,9 @@ window.MEAL_CONFIG = {
   forceDefaultPin: true,
   storageKey: "meal-calendar-v1",
   supabase: {
-    enabled: true,
+    enabled: false,
     url: "https://vgxrzldimgngqytimvon.supabase.co",
-    anonKey: "sb_publishable_z72hoWpJjnSg1gEGKmn5rQ_gkqmwRgZ",
+    anonKey: "",
   },
   syncIntervalMs: 8000,
 };

@@ -145,8 +145,11 @@
       plan: {},
       shopping: {
         selectedDays: [],
-        checked: {},
-        extras: [],
+        extras: [], // {id,name,qty,unit}
+        backlog: [], // not taken from last trip {id,key,name,qty,unit,sources}
+        cart: [], // active basket {id,key,name,qty,unit,sources,checked,tripDays}
+        home: [], // {id,key,name,qty,unit,stickyHome,coveredUntilDays,confirmedAt}
+        checked: {}, // legacy
         generatedAt: null,
       },
       meta: {
@@ -195,8 +198,8 @@
       state = { ...defaultState(), ...parsed, unlocked: false };
       if (!Array.isArray(state.recipes)) state.recipes = [];
       if (!state.plan || typeof state.plan !== "object") state.plan = {};
-      if (!state.shopping) state.shopping = { selectedDays: [], checked: {}, extras: [], generatedAt: null };
-      if (!Array.isArray(state.shopping.extras)) state.shopping.extras = [];
+      if (!state.shopping) state.shopping = defaultState().shopping;
+      migrateShopping(state.shopping);
       // migrate recipes without servingsBase / kcal
       state.recipes.forEach((r) => {
         if (r.servingsBase == null || !(Number(r.servingsBase) > 0)) r.servingsBase = 2;
@@ -224,13 +227,23 @@
     return () => listeners.delete(fn);
   }
 
+  function migrateShopping(s) {
+    if (!s) return;
+    if (!s.selectedDays) s.selectedDays = [];
+    if (!Array.isArray(s.extras)) s.extras = [];
+    if (!Array.isArray(s.backlog)) s.backlog = [];
+    if (!Array.isArray(s.cart)) s.cart = [];
+    if (!Array.isArray(s.home)) s.home = [];
+    if (!s.checked) s.checked = {};
+  }
+
   function replaceState(next, { unlock = false, silent = false } = {}) {
     const wasUnlocked = state.unlocked;
     state = { ...defaultState(), ...next };
     if (!Array.isArray(state.recipes)) state.recipes = [];
     if (!state.plan) state.plan = {};
-    if (!state.shopping) state.shopping = { selectedDays: [], checked: {}, extras: [], generatedAt: null };
-    if (!Array.isArray(state.shopping.extras)) state.shopping.extras = [];
+    if (!state.shopping) state.shopping = defaultState().shopping;
+    migrateShopping(state.shopping);
     state.unlocked = unlock ? true : wasUnlocked;
     if (!silent) {
       try {
@@ -636,14 +649,42 @@
     { name: "Vershoudfolie", unit: "rol" },
   ];
 
-  function buildShoppingList(days) {
-    const map = new Map();
+  function itemKey(name, unit) {
+    return normalizeIngredientName(name) + "||" + String(unit || "").trim().toLowerCase();
+  }
 
+  function todayStart() {
+    return todayISO();
+  }
+
+  function isDayPast(iso) {
+    return iso < todayStart();
+  }
+
+  function cleanupExpiredHome() {
+    migrateShopping(state.shopping);
+    const today = todayStart();
+    state.shopping.home = (state.shopping.home || []).filter((h) => {
+      if (h.stickyHome) return true;
+      const days = h.coveredUntilDays || [];
+      if (!days.length) return false;
+      // still covering if any day is today or future
+      return days.some((d) => d >= today);
+    });
+  }
+
+  function isCoveredByHome(key) {
+    cleanupExpiredHome();
+    return (state.shopping.home || []).some((h) => h.key === key && (h.stickyHome || (h.coveredUntilDays || []).some((d) => d >= todayStart())));
+  }
+
+  /** Raw need from selected plan days (scaled) */
+  function buildNeedsFromDays(days) {
+    const map = new Map();
     function addIng(name, qty, unit, source) {
       const nameKey = normalizeIngredientName(name);
       if (!nameKey) return;
-      const unitKey = String(unit || "").trim().toLowerCase();
-      const key = nameKey + "||" + unitKey;
+      const key = itemKey(name, unit);
       if (!map.has(key)) {
         map.set(key, {
           key,
@@ -656,9 +697,7 @@
       }
       const row = map.get(key);
       const q = qty == null || qty === "" ? null : Number(qty);
-      if (q != null && !Number.isNaN(q)) {
-        row.qty = (row.qty == null ? 0 : row.qty) + q;
-      }
+      if (q != null && !Number.isNaN(q)) row.qty = (row.qty == null ? 0 : row.qty) + q;
       if (source && !row.sources.includes(source)) row.sources.push(source);
     }
 
@@ -668,7 +707,6 @@
       if (day.showBreakfast && getSlotRecipeId(day, "breakfast")) slotNames.push("breakfast");
       if (day.showLunch && getSlotRecipeId(day, "lunch")) slotNames.push("lunch");
       if (getSlotRecipeId(day, "dinner")) slotNames.push("dinner");
-
       slotNames.forEach((slot) => {
         const rid = getSlotRecipeId(day, slot);
         const recipe = getRecipe(rid);
@@ -676,8 +714,7 @@
         const base = getRecipeServingsBase(recipe);
         const servings = getSlotServings(day, slot) || base;
         const factor = base > 0 ? servings / base : 1;
-        const label =
-          recipe.name + (servings !== base ? " (" + servings + "p)" : "");
+        const label = recipe.name + (servings !== base ? " (" + servings + "p)" : "");
         (recipe.ingredients || []).forEach((ing) => {
           const q = ing.qty == null || ing.qty === "" ? null : Number(ing.qty);
           const scaled = q == null || Number.isNaN(q) ? null : Math.round(q * factor * 100) / 100;
@@ -685,50 +722,85 @@
         });
       });
     });
+    return map;
+  }
 
-    // Extra boodschappen (los van recepten)
+  /**
+   * Voorbereiden list = needs from days + extras + backlog − home − already in cart
+   */
+  function getPrepList() {
+    migrateShopping(state.shopping);
+    cleanupExpiredHome();
+    const days = state.shopping.selectedDays || [];
+    const map = buildNeedsFromDays(days);
+
     (state.shopping.extras || []).forEach((ex) => {
-      const nameKey = normalizeIngredientName(ex.name);
-      const unitKey = String(ex.unit || "").trim().toLowerCase();
-      const key = "extra||" + (ex.id || nameKey + "||" + unitKey);
-      map.set(key, {
-        key,
-        name: String(ex.name || "").trim(),
-        unit: String(ex.unit || "").trim(),
-        qty: ex.qty == null || ex.qty === "" ? null : Number(ex.qty),
-        sources: ["Extra"],
-        kind: "extra",
-        extraId: ex.id,
-      });
+      const key = itemKey(ex.name, ex.unit);
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          name: String(ex.name || "").trim(),
+          unit: String(ex.unit || "").trim(),
+          qty: ex.qty == null || ex.qty === "" ? null : Number(ex.qty),
+          sources: ["Extra"],
+          kind: "extra",
+          extraId: ex.id,
+        });
+      } else {
+        const row = map.get(key);
+        const q = ex.qty == null || ex.qty === "" ? null : Number(ex.qty);
+        if (q != null && !Number.isNaN(q)) row.qty = (row.qty == null ? 0 : row.qty) + q;
+        if (!row.sources.includes("Extra")) row.sources.push("Extra");
+      }
     });
 
-    return Array.from(map.values()).sort((a, b) => {
-      if (a.kind !== b.kind) return a.kind === "extra" ? 1 : -1;
-      return a.name.localeCompare(b.name, "nl");
+    // merge backlog
+    (state.shopping.backlog || []).forEach((b) => {
+      if (!map.has(b.key)) {
+        map.set(b.key, {
+          key: b.key,
+          name: b.name,
+          unit: b.unit || "",
+          qty: b.qty,
+          sources: (b.sources || []).slice(),
+          kind: "backlog",
+          backlogId: b.id,
+        });
+      } else {
+        const row = map.get(b.key);
+        if (b.qty != null && !Number.isNaN(Number(b.qty))) {
+          row.qty = (row.qty == null ? 0 : row.qty) + Number(b.qty);
+        }
+        (b.sources || []).forEach((s) => {
+          if (!row.sources.includes(s)) row.sources.push(s);
+        });
+        if (!row.sources.includes("Niet meegenomen")) row.sources.push("Niet meegenomen");
+      }
     });
+
+    const cartKeys = new Set((state.shopping.cart || []).map((c) => c.key));
+    const list = [];
+    map.forEach((row) => {
+      if (isCoveredByHome(row.key)) return; // already at home
+      if (cartKeys.has(row.key)) return; // already in basket
+      list.push(row);
+    });
+    return list.sort((a, b) => a.name.localeCompare(b.name, "nl"));
+  }
+
+  /** legacy helper used by older UI bits */
+  function buildShoppingList(days) {
+    const prev = state.shopping.selectedDays;
+    if (days) state.shopping.selectedDays = days;
+    const list = getPrepList();
+    if (days) state.shopping.selectedDays = prev;
+    return list;
   }
 
   function setShoppingDays(days) {
+    migrateShopping(state.shopping);
     state.shopping.selectedDays = (days || []).slice().sort();
     state.shopping.generatedAt = new Date().toISOString();
-    const items = buildShoppingList(state.shopping.selectedDays);
-    const keys = new Set(items.map((i) => i.key));
-    const nextChecked = {};
-    Object.keys(state.shopping.checked || {}).forEach((k) => {
-      if (keys.has(k)) nextChecked[k] = state.shopping.checked[k];
-    });
-    state.shopping.checked = nextChecked;
-    persist();
-  }
-
-  function toggleShoppingCheck(key) {
-    state.shopping.checked = state.shopping.checked || {};
-    state.shopping.checked[key] = !state.shopping.checked[key];
-    persist();
-  }
-
-  function clearShoppingChecks() {
-    state.shopping.checked = {};
     persist();
   }
 
@@ -737,7 +809,7 @@
   }
 
   function addShoppingExtra(item) {
-    if (!state.shopping.extras) state.shopping.extras = [];
+    migrateShopping(state.shopping);
     const name = String(item.name || "").trim();
     if (!name) return null;
     const row = {
@@ -753,13 +825,236 @@
   }
 
   function removeShoppingExtra(id) {
-    if (!state.shopping.extras) return;
+    migrateShopping(state.shopping);
     state.shopping.extras = state.shopping.extras.filter((x) => x.id !== id);
     persist();
   }
 
   function clearShoppingExtras() {
+    migrateShopping(state.shopping);
     state.shopping.extras = [];
+    persist();
+  }
+
+  /** Prep: mark item as already at home (sticky). optional meta: {name, unit, qty} */
+  function markPrepItemHome(key, meta) {
+    migrateShopping(state.shopping);
+    if (!key) return;
+    const fromExtra = (state.shopping.extras || []).find((ex) => itemKey(ex.name, ex.unit) === key);
+    const fromBacklog = (state.shopping.backlog || []).find((b) => b.key === key);
+    const fromPrep = getPrepList().find((p) => p.key === key);
+    const name =
+      (meta && meta.name) ||
+      (fromPrep && fromPrep.name) ||
+      (fromExtra && fromExtra.name) ||
+      (fromBacklog && fromBacklog.name) ||
+      key.split("||")[0];
+    const unit =
+      (meta && meta.unit) ||
+      (fromPrep && fromPrep.unit) ||
+      (fromExtra && fromExtra.unit) ||
+      (fromBacklog && fromBacklog.unit) ||
+      key.split("||")[1] ||
+      "";
+    const qty =
+      (meta && meta.qty) != null
+        ? meta.qty
+        : fromPrep
+          ? fromPrep.qty
+          : fromExtra
+            ? fromExtra.qty
+            : fromBacklog
+              ? fromBacklog.qty
+              : null;
+
+    state.shopping.extras = (state.shopping.extras || []).filter((ex) => itemKey(ex.name, ex.unit) !== key);
+    state.shopping.backlog = (state.shopping.backlog || []).filter((b) => b.key !== key);
+    const existing = (state.shopping.home || []).find((h) => h.key === key);
+    if (existing) {
+      existing.stickyHome = true;
+      existing.name = name;
+      existing.unit = unit;
+      existing.confirmedAt = new Date().toISOString();
+    } else {
+      state.shopping.home.push({
+        id: uid(),
+        key,
+        name,
+        unit,
+        qty,
+        stickyHome: true,
+        coveredUntilDays: [],
+        confirmedAt: new Date().toISOString(),
+      });
+    }
+    persist();
+  }
+
+  function removeBacklogItem(id) {
+    migrateShopping(state.shopping);
+    state.shopping.backlog = (state.shopping.backlog || []).filter((b) => b.id !== id);
+    persist();
+  }
+
+  function clearHomeStock() {
+    migrateShopping(state.shopping);
+    state.shopping.home = [];
+    persist();
+  }
+
+  function getHomeList() {
+    cleanupExpiredHome();
+    return (state.shopping.home || []).slice();
+  }
+
+  function getCart() {
+    migrateShopping(state.shopping);
+    return (state.shopping.cart || []).slice();
+  }
+
+  function getBacklog() {
+    migrateShopping(state.shopping);
+    return (state.shopping.backlog || []).slice();
+  }
+
+  /** Transfer prep open items → cart (merge). mode: 'merge' | 'replace' */
+  function transferPrepToCart(mode) {
+    migrateShopping(state.shopping);
+    const prep = getPrepList();
+    const tripDays = (state.shopping.selectedDays || []).slice();
+    if (mode === "replace") {
+      // unbought cart items go back to backlog
+      (state.shopping.cart || []).forEach((c) => {
+        if (!c.checked) {
+          state.shopping.backlog.push({
+            id: uid(),
+            key: c.key,
+            name: c.name,
+            qty: c.qty,
+            unit: c.unit,
+            sources: c.sources || [],
+          });
+        }
+      });
+      state.shopping.cart = [];
+    }
+
+    const byKey = new Map((state.shopping.cart || []).map((c) => [c.key, c]));
+    prep.forEach((p) => {
+      if (byKey.has(p.key)) {
+        const c = byKey.get(p.key);
+        if (p.qty != null && !Number.isNaN(Number(p.qty))) {
+          c.qty = (c.qty == null ? 0 : Number(c.qty)) + Number(p.qty);
+        }
+        (p.sources || []).forEach((s) => {
+          if (!c.sources) c.sources = [];
+          if (!c.sources.includes(s)) c.sources.push(s);
+        });
+        c.tripDays = Array.from(new Set([].concat(c.tripDays || [], tripDays)));
+      } else {
+        const row = {
+          id: uid(),
+          key: p.key,
+          name: p.name,
+          qty: p.qty,
+          unit: p.unit || "",
+          sources: (p.sources || []).slice(),
+          checked: false,
+          tripDays: tripDays.slice(),
+        };
+        state.shopping.cart.push(row);
+        byKey.set(p.key, row);
+      }
+    });
+
+    // clear extras & backlog that were transferred (all prep items)
+    const transferredKeys = new Set(prep.map((p) => p.key));
+    state.shopping.extras = (state.shopping.extras || []).filter((ex) => !transferredKeys.has(itemKey(ex.name, ex.unit)));
+    state.shopping.backlog = (state.shopping.backlog || []).filter((b) => !transferredKeys.has(b.key));
+    persist();
+    return state.shopping.cart.length;
+  }
+
+  function cartToggleCheck(id) {
+    migrateShopping(state.shopping);
+    const row = (state.shopping.cart || []).find((c) => c.id === id);
+    if (!row) return;
+    row.checked = !row.checked;
+    persist();
+  }
+
+  function cartDeleteItem(id) {
+    migrateShopping(state.shopping);
+    state.shopping.cart = (state.shopping.cart || []).filter((c) => c.id !== id);
+    persist();
+  }
+
+  function cartClearAll() {
+    migrateShopping(state.shopping);
+    state.shopping.cart = [];
+    persist();
+  }
+
+  /**
+   * Complete shopping trip:
+   * - checked → home (coveredUntilDays = tripDays)
+   * - unchecked → backlog
+   * - cart cleared
+   */
+  function completeShoppingTrip() {
+    migrateShopping(state.shopping);
+    const cart = state.shopping.cart || [];
+    let taken = 0;
+    let left = 0;
+    cart.forEach((c) => {
+      if (c.checked) {
+        taken++;
+        const existing = (state.shopping.home || []).find((h) => h.key === c.key);
+        const days = (c.tripDays || []).slice();
+        if (existing) {
+          existing.coveredUntilDays = Array.from(new Set([].concat(existing.coveredUntilDays || [], days)));
+          existing.confirmedAt = new Date().toISOString();
+          // keep sticky if was sticky
+        } else {
+          state.shopping.home.push({
+            id: uid(),
+            key: c.key,
+            name: c.name,
+            unit: c.unit || "",
+            qty: c.qty,
+            stickyHome: false,
+            coveredUntilDays: days,
+            confirmedAt: new Date().toISOString(),
+          });
+        }
+      } else {
+        left++;
+        state.shopping.backlog.push({
+          id: uid(),
+          key: c.key,
+          name: c.name,
+          qty: c.qty,
+          unit: c.unit || "",
+          sources: (c.sources || []).concat(["Niet meegenomen"]),
+        });
+      }
+    });
+    state.shopping.cart = [];
+    persist();
+    return { taken, left };
+  }
+
+  // legacy aliases
+  function toggleShoppingCheck(key) {
+    const row = (state.shopping.cart || []).find((c) => c.key === key || c.id === key);
+    if (row) cartToggleCheck(row.id);
+  }
+
+  function clearShoppingChecks() {
+    migrateShopping(state.shopping);
+    (state.shopping.cart || []).forEach((c) => {
+      c.checked = false;
+    });
     persist();
   }
 
@@ -836,6 +1131,7 @@
     copySlot,
     copyDay,
     buildShoppingList,
+    getPrepList,
     setShoppingDays,
     toggleShoppingCheck,
     clearShoppingChecks,
@@ -843,6 +1139,18 @@
     addShoppingExtra,
     removeShoppingExtra,
     clearShoppingExtras,
+    markPrepItemHome,
+    removeBacklogItem,
+    clearHomeStock,
+    getHomeList,
+    getCart,
+    getBacklog,
+    transferPrepToCart,
+    cartToggleCheck,
+    cartDeleteItem,
+    cartClearAll,
+    completeShoppingTrip,
+    cleanupExpiredHome,
     exportJSON,
     importJSON,
     resetDemo,

@@ -725,9 +725,9 @@ button {
   bottom: 0;
   z-index: 30;
   display: none;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 4px;
-  padding: 8px 10px calc(8px + var(--safe-b));
+  grid-template-columns: repeat(5, 1fr);
+  gap: 2px;
+  padding: 8px 6px calc(8px + var(--safe-b));
   background: rgba(255, 255, 255, 0.94);
   border-top: 1px solid var(--line);
   backdrop-filter: blur(12px);
@@ -741,10 +741,10 @@ button {
   display: grid;
   place-items: center;
   gap: 2px;
-  padding: 6px 4px;
-  border-radius: 14px;
+  padding: 6px 2px;
+  border-radius: 12px;
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.65rem;
   font-weight: 600;
 }
 
