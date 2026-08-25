@@ -97,6 +97,10 @@
     return r ? r.name : null;
   }
 
+  function slotRecipeName(day, slot) {
+    return recipeName(MealStore.getSlotRecipeId(day, slot));
+  }
+
   /* ---------- navigation ---------- */
   function showApp(unlocked) {
     $("#screen-pin").classList.toggle("active", !unlocked);
@@ -137,15 +141,16 @@
     if (pinBuffer.length >= 8) return;
     pinBuffer += key;
     renderPinDots();
-    if (pinBuffer.length >= 4) {
-      // auto-try at 4+ if matches length of default attempts
+    const expectedLen = String((window.MEAL_CONFIG && window.MEAL_CONFIG.defaultPin) || "1234").length;
+    const tryLen = Math.max(4, expectedLen || 4);
+    if (pinBuffer.length >= tryLen) {
       const ok = await MealStore.verifyPin(pinBuffer);
       if (ok) {
         pinBuffer = "";
         renderPinDots();
         showApp(true);
         toast("Welkom 👋");
-      } else if (pinBuffer.length >= 8) {
+      } else if (pinBuffer.length >= 12) {
         $("#pin-error").textContent = "Pincode onjuist";
         pinBuffer = "";
         renderPinDots();
@@ -201,12 +206,12 @@
 
       let mealsHtml = "";
       if (day.showBreakfast) {
-        mealsHtml += mealRowHtml("breakfast", day.breakfast);
+        mealsHtml += mealRowHtml(day, "breakfast");
       }
       if (day.showLunch) {
-        mealsHtml += mealRowHtml("lunch", day.lunch);
+        mealsHtml += mealRowHtml(day, "lunch");
       }
-      mealsHtml += mealRowHtml("dinner", day.dinner);
+      mealsHtml += mealRowHtml(day, "dinner");
 
       const extras = [];
       if (!day.showBreakfast) extras.push('<button type="button" class="btn btn-sm btn-secondary" data-act="add-slot" data-slot="breakfast">+ Ontbijt</button>');
@@ -247,17 +252,21 @@
       const iso = y + "-" + String(m).padStart(2, "0") + "-" + String(d).padStart(2, "0");
       const meta = formatDayHeader(iso);
       const day = MealStore.getDay(iso);
-      const dinner = day.dinner ? recipeName(day.dinner) : null;
+      const dinnerId = MealStore.getSlotRecipeId(day, "dinner");
+      const dinner = dinnerId ? recipeName(dinnerId) : null;
+      const dinnerServ = dinnerId ? MealStore.getSlotServings(day, "dinner") : null;
       if (dinner) planned++;
 
       const extras = [];
-      if (day.showBreakfast && day.breakfast) {
-        const n = recipeName(day.breakfast);
-        if (n) extras.push("Ontbijt: " + n);
+      if (day.showBreakfast && MealStore.getSlotRecipeId(day, "breakfast")) {
+        const n = slotRecipeName(day, "breakfast");
+        const s = MealStore.getSlotServings(day, "breakfast");
+        if (n) extras.push("Ontbijt: " + n + (s ? " (" + s + "p)" : ""));
       }
-      if (day.showLunch && day.lunch) {
-        const n = recipeName(day.lunch);
-        if (n) extras.push("Lunch: " + n);
+      if (day.showLunch && MealStore.getSlotRecipeId(day, "lunch")) {
+        const n = slotRecipeName(day, "lunch");
+        const s = MealStore.getSlotServings(day, "lunch");
+        if (n) extras.push("Lunch: " + n + (s ? " (" + s + "p)" : ""));
       }
 
       const btn = document.createElement("button");
@@ -275,7 +284,7 @@
         '<div class="m-dinner' +
         (dinner ? "" : " none") +
         '">' +
-        escapeHtml(dinner || "— nog open —") +
+        escapeHtml(dinner ? dinner + (dinnerServ ? " · " + dinnerServ + "p" : "") : "— nog open —") +
         "</div>" +
         (extras.length
           ? '<div class="m-meta">' + escapeHtml(extras.join(" · ")) + "</div>"
@@ -298,9 +307,11 @@
     frags.forEach((el) => host.appendChild(el));
   }
 
-  function mealRowHtml(slot, recipeId) {
+  function mealRowHtml(day, slot) {
+    const recipeId = MealStore.getSlotRecipeId(day, slot);
     const name = recipeName(recipeId);
     const recipe = recipeId ? MealStore.getRecipe(recipeId) : null;
+    const servings = recipeId ? MealStore.getSlotServings(day, slot) : null;
     return (
       '<div class="meal-row" data-slot="' +
       slot +
@@ -313,6 +324,7 @@
       (name ? "" : " empty") +
       '">' +
       (name || "Nog niets gepland") +
+      (name && servings ? " · " + servings + "p" : "") +
       "</div>" +
       (recipe && recipe.rating ? starsHtml(recipe.rating) : "") +
       "</div></div>"
@@ -339,8 +351,10 @@
 
     function slotBlock(slot, visible) {
       if (!visible && slot !== "dinner") return null;
-      const rid = day[slot];
+      const rid = MealStore.getSlotRecipeId(day, slot);
       const r = rid ? MealStore.getRecipe(rid) : null;
+      const serv = rid ? MealStore.getSlotServings(day, slot) : null;
+      const base = r ? MealStore.getRecipeServingsBase(r) : 4;
       const box = document.createElement("div");
       box.className = "settings-card";
       box.innerHTML =
@@ -351,6 +365,29 @@
         (r ? escapeHtml(r.name) : "Nog geen gerecht") +
         (r && r.rating ? " · " + "★".repeat(r.rating) : "") +
         "</p>" +
+        (r
+          ? '<div class="field" style="margin-top:8px"><label>Aantal personen (recept basis: ' +
+            base +
+            "p)</label>" +
+            '<div class="btn-row" style="align-items:center">' +
+            '<button type="button" class="btn btn-sm btn-secondary" data-day-act="serv-minus" data-slot="' +
+            slot +
+            '">−</button>' +
+            '<span style="min-width:3rem;text-align:center;font-weight:700" data-serv-label="' +
+            slot +
+            '">' +
+            serv +
+            "p</span>" +
+            '<button type="button" class="btn btn-sm btn-secondary" data-day-act="serv-plus" data-slot="' +
+            slot +
+            '">+</button>' +
+            '<input type="number" min="1" max="99" value="' +
+            serv +
+            '" data-serv-input="' +
+            slot +
+            '" style="width:4.5rem;min-height:36px;border-radius:12px;border:1px solid var(--line);padding:0 8px" />' +
+            "</div></div>"
+          : "") +
         '<div class="btn-row">' +
         '<button type="button" class="btn btn-sm btn-primary" data-day-act="pick" data-slot="' +
         slot +
@@ -415,21 +452,86 @@
         openDaySheet(iso);
       }
       if (act === "rate") {
-        const rid = MealStore.getDay(iso)[slot];
+        const rid = MealStore.getSlotRecipeId(MealStore.getDay(iso), slot);
         if (rid) openRating(rid, () => openDaySheet(iso));
       }
       if (act === "copy-slot") openCopySlot(iso, slot);
+      if (act === "serv-minus" || act === "serv-plus") {
+        const d = MealStore.getDay(iso);
+        let s = MealStore.getSlotServings(d, slot) || 4;
+        s = act === "serv-minus" ? Math.max(1, s - 1) : Math.min(99, s + 1);
+        MealStore.setSlotServings(iso, slot, s);
+        openDaySheet(iso);
+        renderCalendar();
+      }
+    });
+
+    wrap.addEventListener("change", (e) => {
+      const inp = e.target.closest("[data-serv-input]");
+      if (!inp) return;
+      const slot = inp.getAttribute("data-serv-input");
+      let s = Number(inp.value);
+      if (!(s > 0)) s = 1;
+      MealStore.setSlotServings(iso, slot, s);
+      openDaySheet(iso);
+      renderCalendar();
     });
 
     return wrap;
   }
 
   function openRecipePicker(dayIso, slot) {
-    const recipes = MealStore.listRecipes();
     const wrap = document.createElement("div");
     wrap.innerHTML =
       '<div class="search-bar"><input type="search" id="pick-search" placeholder="Zoek recept…" /></div><div class="pick-list" id="pick-list"></div>' +
       '<button type="button" class="btn btn-primary btn-block" id="pick-new" style="margin-top:10px">+ Nieuw recept</button>';
+
+    function chooseRecipe(r) {
+      const base = MealStore.getRecipeServingsBase(r);
+      const body = document.createElement("div");
+      body.innerHTML =
+        "<p style=\"margin:0 0 10px\">Voor hoeveel personen plan je <strong>" +
+        escapeHtml(r.name) +
+        "</strong>?<br/><span style=\"color:var(--muted);font-size:0.88rem\">Recept-basis: " +
+        base +
+        " personen (boodschappen worden geschaald)</span></p>" +
+        '<div class="field"><label>Personen</label>' +
+        '<input id="pick-serv" type="number" min="1" max="99" value="' +
+        base +
+        '" /></div>' +
+        '<div class="btn-row">' +
+        [1, 2, 3, 4, 5, 6]
+          .map(
+            (n) =>
+              '<button type="button" class="btn btn-sm btn-secondary" data-quick-serv="' +
+              n +
+              '">' +
+              n +
+              "p</button>"
+          )
+          .join("") +
+        "</div>";
+      body.querySelectorAll("[data-quick-serv]").forEach((b) => {
+        b.addEventListener("click", () => {
+          body.querySelector("#pick-serv").value = b.getAttribute("data-quick-serv");
+        });
+      });
+      openSheet("Aantal personen", body, [
+        {
+          label: "Bevestigen",
+          className: "btn-primary",
+          action: () => {
+            let s = Number(body.querySelector("#pick-serv").value);
+            if (!(s > 0)) s = base;
+            MealStore.setSlot(dayIso, slot, r.id, s);
+            toast(r.name + " · " + s + "p");
+            openDaySheet(dayIso);
+            renderCalendar();
+          },
+        },
+        { label: "Terug", className: "btn-secondary", action: () => openRecipePicker(dayIso, slot) },
+      ]);
+    }
 
     function fill(q) {
       const list = $("#pick-list", wrap);
@@ -442,13 +544,14 @@
       items.forEach((r) => {
         const b = document.createElement("button");
         b.type = "button";
-        b.innerHTML = escapeHtml(r.name) + (r.rating ? " " + starsHtml(r.rating) : "");
-        b.addEventListener("click", () => {
-          MealStore.setSlot(dayIso, slot, r.id);
-          toast(r.name + " gepland");
-          openDaySheet(dayIso);
-          renderCalendar();
-        });
+        const base = MealStore.getRecipeServingsBase(r);
+        b.innerHTML =
+          escapeHtml(r.name) +
+          (r.rating ? " " + starsHtml(r.rating) : "") +
+          ' <span style="color:var(--muted);font-weight:500">· ' +
+          base +
+          "p</span>";
+        b.addEventListener("click", () => chooseRecipe(r));
         list.appendChild(b);
       });
     }
@@ -458,9 +561,13 @@
     wrap.querySelector("#pick-new").addEventListener("click", () => {
       openRecipeEditor(null, (savedId) => {
         if (savedId) {
-          MealStore.setSlot(dayIso, slot, savedId);
-          openDaySheet(dayIso);
-          renderCalendar();
+          const r = MealStore.getRecipe(savedId);
+          if (r) chooseRecipe(r);
+          else {
+            MealStore.setSlot(dayIso, slot, savedId);
+            openDaySheet(dayIso);
+            renderCalendar();
+          }
         }
       });
     });
@@ -632,6 +739,9 @@
         starsHtml(r.rating) +
         (r.timeMinutes ? " · " + r.timeMinutes + " min" : "") +
         " · " +
+        (r.servingsBase || 4) +
+        "p" +
+        " · " +
         ingCount +
         " ingrediënten</div>" +
         (r.notes ? '<div class="meta" style="margin-top:4px">' + escapeHtml(r.notes) + "</div>" : "");
@@ -654,6 +764,9 @@
       '<div class="field"><label>Bereidingstijd (min)</label><input id="r-time" type="number" min="0" inputmode="numeric" value="' +
       (r && r.timeMinutes != null ? r.timeMinutes : "") +
       '" /></div>' +
+      '<div class="field"><label>Hoeveelheden voor (personen)</label><input id="r-servings" type="number" min="1" max="99" inputmode="numeric" value="' +
+      (r && r.servingsBase != null ? r.servingsBase : 4) +
+      '" /><p style="margin:6px 0 0;color:var(--muted);font-size:0.8rem">Basisportie van dit recept. Op een avond kies je hoeveel personen je kookt; boodschappen schalen mee.</p></div>' +
       '<div class="field"><label>Score</label><div class="rating-picker" id="r-rating"></div></div>' +
       '<div class="section-title">Ingrediënten</div>' +
       '<div id="r-ings"></div>' +
@@ -732,6 +845,7 @@
             name,
             notes: $("#r-notes", wrap).value,
             timeMinutes: $("#r-time", wrap).value,
+            servingsBase: $("#r-servings", wrap).value,
             rating,
             ingredients,
           });
@@ -769,33 +883,55 @@
     const state = MealStore.get();
     const selected = new Set(state.shopping.selectedDays || []);
     const pick = $("#shop-day-pick");
-    pick.innerHTML = "";
-
-    // Show current week + next week
-    for (let i = 0; i < 14; i++) {
-      const iso = MealStore.addDaysISO(weekStart, i);
-      const meta = formatDayHeader(iso);
-      const day = MealStore.getDay(iso);
-      const hasMeal = !!(day.dinner || (day.showBreakfast && day.breakfast) || (day.showLunch && day.lunch));
-      const lab = document.createElement("label");
-      lab.innerHTML =
-        '<input type="checkbox" value="' +
-        iso +
-        '"' +
-        (selected.has(iso) ? " checked" : "") +
-        (hasMeal ? "" : " disabled") +
-        " /> " +
-        capitalize(meta.short) +
-        " " +
-        meta.label +
-        (hasMeal ? "" : " (leeg)");
-      lab.querySelector("input").addEventListener("change", () => {
-        const days = $$("#shop-day-pick input:checked").map((x) => x.value);
-        MealStore.setShoppingDays(days);
-        renderShoppingList();
-      });
-      pick.appendChild(lab);
+    if (pick) {
+      pick.innerHTML = "";
+      for (let i = 0; i < 14; i++) {
+        const iso = MealStore.addDaysISO(weekStart, i);
+        const meta = formatDayHeader(iso);
+        const day = MealStore.getDay(iso);
+        const hasMeal = !!(
+          MealStore.getSlotRecipeId(day, "dinner") ||
+          (day.showBreakfast && MealStore.getSlotRecipeId(day, "breakfast")) ||
+          (day.showLunch && MealStore.getSlotRecipeId(day, "lunch"))
+        );
+        const lab = document.createElement("label");
+        lab.innerHTML =
+          '<input type="checkbox" value="' +
+          iso +
+          '"' +
+          (selected.has(iso) ? " checked" : "") +
+          (hasMeal ? "" : " disabled") +
+          " /> " +
+          capitalize(meta.short) +
+          " " +
+          meta.label +
+          (hasMeal ? "" : " (leeg)");
+        lab.querySelector("input").addEventListener("change", () => {
+          const days = $$("#shop-day-pick input:checked").map((x) => x.value);
+          MealStore.setShoppingDays(days);
+          renderShoppingList();
+        });
+        pick.appendChild(lab);
+      }
     }
+
+    const presetsHost = $("#shop-presets");
+    if (presetsHost && !presetsHost.dataset.ready) {
+      presetsHost.dataset.ready = "1";
+      MealStore.getShopPresets().forEach((p) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "chip";
+        chip.textContent = p.name;
+        chip.addEventListener("click", () => {
+          MealStore.addShoppingExtra({ name: p.name, qty: 1, unit: p.unit || "" });
+          toast(p.name + " toegevoegd");
+          renderShoppingList();
+        });
+        presetsHost.appendChild(chip);
+      });
+    }
+
     renderShoppingList();
   }
 
@@ -805,47 +941,72 @@
     const items = MealStore.buildShoppingList(days);
     const host = $("#shop-list");
     const summary = $("#shop-summary");
+    if (!host) return;
     host.innerHTML = "";
 
-    if (!days.length) {
-      summary.textContent = "Selecteer dagen hierboven.";
+    const hasExtras = (state.shopping.extras || []).length > 0;
+    if (!days.length && !hasExtras) {
+      if (summary) summary.textContent = "Selecteer dagen en/of voeg extra’s toe.";
       host.innerHTML =
-        '<div class="empty-state"><div class="big">🛒</div>Kies dagen met maaltijden om een boodschappenlijst te maken.</div>';
+        '<div class="empty-state"><div class="big">🛒</div>Kies dagen met maaltijden of tik een snelle extra hierboven.</div>';
       return;
     }
 
     const checked = state.shopping.checked || {};
     const done = items.filter((i) => checked[i.key]).length;
-    summary.textContent = items.length + " items · " + done + " afgevinkt · " + days.length + " dagen";
+    if (summary) {
+      summary.textContent =
+        items.length +
+        " items · " +
+        done +
+        " afgevinkt" +
+        (days.length ? " · " + days.length + " dagen" : "") +
+        (hasExtras ? " · extra’s inbegrepen" : "");
+    }
 
     if (!items.length) {
-      host.innerHTML = '<div class="empty-state">Geen ingrediënten voor de gekozen dagen.</div>';
+      host.innerHTML = '<div class="empty-state">Nog geen items.</div>';
       return;
     }
 
     items.forEach((item) => {
       const isDone = !!checked[item.key];
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "check-item" + (isDone ? " done" : "");
+      const row = document.createElement("div");
+      row.className = "check-item" + (isDone ? " done" : "");
+      row.style.cursor = "pointer";
       const qtyText =
-        item.qty != null
+        item.qty != null && !Number.isNaN(item.qty)
           ? prettyQty(item.qty) + (item.unit ? " " + item.unit : "")
           : item.unit || "";
-      btn.innerHTML =
+      row.innerHTML =
         '<div class="check-box">' +
         (isDone ? "✓" : "") +
-        '</div><div><div class="name">' +
+        '</div><div style="flex:1;min-width:0"><div class="name">' +
         escapeHtml(item.name) +
+        (item.kind === "extra" ? ' <span style="color:var(--accent);font-size:0.75rem">EXTRA</span>' : "") +
         '</div><div class="qty">' +
         escapeHtml(qtyText) +
-        (item.sources.length ? " · " + escapeHtml(item.sources.join(", ")) : "") +
-        "</div></div>";
-      btn.addEventListener("click", () => {
+        (item.sources && item.sources.length ? " · " + escapeHtml(item.sources.join(", ")) : "") +
+        "</div></div>" +
+        (item.kind === "extra" && item.extraId
+          ? '<button type="button" class="btn btn-sm btn-ghost" data-rm-extra="' +
+            item.extraId +
+            '">✕</button>'
+          : "");
+      row.addEventListener("click", (e) => {
+        if (e.target.closest("[data-rm-extra]")) return;
         MealStore.toggleShoppingCheck(item.key);
         renderShoppingList();
       });
-      host.appendChild(btn);
+      const rm = row.querySelector("[data-rm-extra]");
+      if (rm) {
+        rm.addEventListener("click", (e) => {
+          e.stopPropagation();
+          MealStore.removeShoppingExtra(rm.getAttribute("data-rm-extra"));
+          renderShoppingList();
+        });
+      }
+      host.appendChild(row);
     });
   }
 
@@ -1036,6 +1197,35 @@ create policy "meal_calendar_write"
       renderShoppingList();
       toast("Afvinkingen gewist");
     });
+
+    const btnClearExtras = $("#btn-clear-extras");
+    if (btnClearExtras) {
+      btnClearExtras.addEventListener("click", () => {
+        if (!confirm("Alle extra boodschappen wissen?")) return;
+        MealStore.clearShoppingExtras();
+        renderShoppingList();
+        toast("Extra’s gewist");
+      });
+    }
+
+    const btnAddExtra = $("#btn-add-extra");
+    if (btnAddExtra) {
+      btnAddExtra.addEventListener("click", () => {
+        const name = ($("#extra-name") && $("#extra-name").value) || "";
+        const qty = ($("#extra-qty") && $("#extra-qty").value) || "";
+        const unit = ($("#extra-unit") && $("#extra-unit").value) || "";
+        if (!String(name).trim()) {
+          toast("Geef een item-naam");
+          return;
+        }
+        MealStore.addShoppingExtra({ name, qty, unit });
+        if ($("#extra-name")) $("#extra-name").value = "";
+        if ($("#extra-qty")) $("#extra-qty").value = "";
+        if ($("#extra-unit")) $("#extra-unit").value = "";
+        toast("Toegevoegd");
+        renderShoppingList();
+      });
+    }
 
     $("#btn-change-pin").addEventListener("click", () => {
       const wrap = document.createElement("div");

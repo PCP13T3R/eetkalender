@@ -90,11 +90,24 @@
       <!-- Shopping -->
       <section class="screen" data-tab="shopping" id="tab-shopping">
         <p style="margin: 0 0 8px; color: var(--muted); font-size: 0.92rem">
-          Vink dagen aan om een boodschappenlijst te maken. Tik op items om af te vinken.
+          Vink dagen aan (recepten × personen). Voeg ook losse boodschappen toe. Tik om af te vinken.
         </p>
         <div class="day-pick" id="shop-day-pick"></div>
+
+        <div class="settings-card" style="margin-bottom: 12px">
+          <h3 style="margin: 0 0 8px; font-size: 1rem">Extra boodschappen</h3>
+          <div class="chip-row" id="shop-presets" style="margin-bottom: 10px"></div>
+          <div class="ing-row" style="grid-template-columns: 1.4fr 0.6fr 0.7fr auto">
+            <input id="extra-name" placeholder="Item (bv. WC-papier)" />
+            <input id="extra-qty" placeholder="hoev." inputmode="decimal" />
+            <input id="extra-unit" placeholder="eenheid" />
+            <button type="button" class="btn btn-sm btn-primary" id="btn-add-extra">+</button>
+          </div>
+        </div>
+
         <div class="btn-row" style="margin-bottom: 12px">
           <button type="button" class="btn btn-secondary" id="btn-clear-checks">Afvinkingen wissen</button>
+          <button type="button" class="btn btn-secondary" id="btn-clear-extras">Extra’s wissen</button>
         </div>
         <p id="shop-summary" class="meta" style="color: var(--muted); font-size: 0.88rem; margin: 0 0 10px"></p>
         <div id="shop-list"></div>
@@ -251,7 +264,7 @@
     <script src="js/app.js"></script>
     <script>
       // App-versie: verhoog bij releases (zichtbaar in Instellingen)
-      window.MEAL_APP_VERSION = "2026.08.25-5";
+      window.MEAL_APP_VERSION = "2026.08.25-7";
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {
           navigator.serviceWorker.register("./sw.js").then((reg) => {

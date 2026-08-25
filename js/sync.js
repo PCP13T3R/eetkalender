@@ -27,21 +27,23 @@
   }
 
   function cfg() {
-    const saved = loadSavedCloud();
+    const saved = loadSavedCloud() || {};
     const file = fileCfg();
-    // Runtime (Settings) wins over config.js
-    if (saved && saved.url && saved.anonKey) {
-      return {
-        enabled: saved.enabled !== false,
-        url: String(saved.url || "").trim(),
-        anonKey: String(saved.anonKey || "").trim(),
-      };
+    // Merge: localStorage overrides, but fall back to config.js defaults
+    // so a published build can ship URL+publishable key (partner only needs PIN).
+    const url = String(saved.url || file.url || "").trim();
+    const anonKey = String(saved.anonKey || file.anonKey || "").trim();
+    let enabled;
+    if (Object.prototype.hasOwnProperty.call(saved, "enabled")) {
+      enabled = saved.enabled !== false;
+    } else {
+      enabled = !!file.enabled;
     }
-    return {
-      enabled: !!file.enabled,
-      url: String(file.url || "").trim(),
-      anonKey: String(file.anonKey || "").trim(),
-    };
+    // If build defaults include full cloud config, treat as enabled
+    if (file.enabled && file.url && file.anonKey && !saved.anonKey && saved.enabled !== false) {
+      enabled = true;
+    }
+    return { enabled: !!enabled && !!(url && anonKey), url, anonKey };
   }
 
   function getCloudConfig() {
@@ -135,6 +137,10 @@
 
     try {
       const c = cfg();
+      // Persist merged config so Settings UI + deellink always have the key
+      if (c.url && c.anonKey) {
+        saveCloudConfig({ enabled: true, url: c.url, anonKey: c.anonKey });
+      }
       client = global.supabase.createClient(c.url, c.anonKey);
       setStatus({ mode: "cloud", message: "Cloud verbinden…" });
 
@@ -245,9 +251,16 @@
 
     if (remoteUpdated >= localUpdated) {
       MealStore.replaceState(data.payload, { unlock: local.unlocked });
+      // Re-apply configured family PIN after cloud pull (pinVersion / forceDefaultPin)
+      if (MealStore.ensurePinInitialized) {
+        await MealStore.ensurePinInitialized();
+      }
       setStatus({ mode: "cloud", message: "Gesynchroniseerd", lastSync: new Date().toISOString() });
     } else {
-      await push(local, true);
+      if (MealStore.ensurePinInitialized) {
+        await MealStore.ensurePinInitialized();
+      }
+      await push(MealStore.get(), true);
       setStatus({
         mode: "cloud",
         message: "Lokaal → cloud geüpload",

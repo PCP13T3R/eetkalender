@@ -1,17 +1,14 @@
-// Eetkalender configuratie
-// Voor multi-user sync: vul Supabase in (zie README) en zet enabled op true.
+﻿// Eetkalender — GitHub Pages build
 window.MEAL_CONFIG = {
   appName: "Eetkalender",
-  // Standaard pincode bij eerste start (wijzigbaar in Instellingen)
-  defaultPin: "1234",
-  // Lokale opslag-sleutel
+  defaultPin: "834883",
+  pinVersion: 2,
+  forceDefaultPin: true,
   storageKey: "meal-calendar-v1",
-  // Optioneel: Supabase voor delen tussen telefoons
   supabase: {
-    enabled: false, // aanzetten in de app (Instellingen) na invullen anon key
+    enabled: true,
     url: "https://vgxrzldimgngqytimvon.supabase.co",
-    anonKey: "", // NOOIT hier plakken — alleen in de app (Instellingen)
+    anonKey: "sb_publishable_z72hoWpJjnSg1gEGKmn5rQ_gkqmwRgZ",
   },
-  // Sync-interval (ms) wanneer Supabase aan staat
   syncIntervalMs: 8000,
 };
