@@ -307,6 +307,11 @@ button {
   min-width: 0;
 }
 
+.month-row .kcal-pill.day {
+  margin-left: 0;
+  flex-shrink: 0;
+}
+
 .month-row .m-dinner {
   font-weight: 650;
   font-size: 0.98rem;
@@ -363,6 +368,46 @@ button {
   background: var(--brand-soft);
   padding: 4px 8px;
   border-radius: 999px;
+}
+
+.kcal-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #dcfce7;
+  border: 1px solid #86efac;
+  color: #166534;
+  font-weight: 800;
+  font-size: 0.78rem;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.kcal-pill.day {
+  font-size: 0.85rem;
+  padding: 6px 12px;
+  margin-left: auto;
+}
+
+.kcal-pill.meal {
+  margin-top: 6px;
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.day-top {
+  flex-wrap: wrap;
+}
+
+.day-top .day-top-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .meal-row {

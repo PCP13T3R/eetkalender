@@ -101,6 +101,36 @@
     return recipeName(MealStore.getSlotRecipeId(day, slot));
   }
 
+  /** Kcal/p for a slot — per person, NOT × servings */
+  function slotKcal(day, slot) {
+    const rid = MealStore.getSlotRecipeId(day, slot);
+    if (!rid) return null;
+    return MealStore.getRecipeKcalPerPerson(MealStore.getRecipe(rid));
+  }
+
+  /** Sum of kcal/p of breakfast+lunch+dinner for the day (still per person totals) */
+  function dayTotalKcal(day) {
+    let total = 0;
+    let any = false;
+    ["breakfast", "lunch", "dinner"].forEach((slot) => {
+      if (slot === "breakfast" && !day.showBreakfast) return;
+      if (slot === "lunch" && !day.showLunch) return;
+      const k = slotKcal(day, slot);
+      if (k != null) {
+        total += k;
+        any = true;
+      }
+    });
+    return any ? total : null;
+  }
+
+  function kcalPillHtml(kcal, kind) {
+    if (kcal == null) return "";
+    const cls = kind === "day" ? "kcal-pill day" : "kcal-pill meal";
+    const suffix = kind === "day" ? " kcal" : " kcal/p";
+    return '<span class="' + cls + '">' + kcal + suffix + "</span>";
+  }
+
   /* ---------- navigation ---------- */
   function showApp(unlocked) {
     $("#screen-pin").classList.toggle("active", !unlocked);
@@ -217,6 +247,7 @@
       if (!day.showBreakfast) extras.push('<button type="button" class="btn btn-sm btn-secondary" data-act="add-slot" data-slot="breakfast">+ Ontbijt</button>');
       if (!day.showLunch) extras.push('<button type="button" class="btn btn-sm btn-secondary" data-act="add-slot" data-slot="lunch">+ Lunch</button>');
 
+      const dayKcal = dayTotalKcal(day);
       card.innerHTML =
         '<div class="day-top">' +
         '<div class="date-block"><div class="dow">' +
@@ -224,8 +255,10 @@
         '</div><div class="dom">' +
         meta.label +
         "</div></div>" +
+        '<div class="day-top-right">' +
         (meta.isToday ? '<span class="badge-today">Vandaag</span>' : "") +
-        "</div>" +
+        kcalPillHtml(dayKcal, "day") +
+        "</div></div>" +
         mealsHtml +
         '<div class="btn-row">' +
         '<button type="button" class="btn btn-sm btn-primary" data-act="open-day">Open</button>' +
@@ -290,20 +323,16 @@
         '<div class="m-dinner' +
         (dinner ? "" : " none") +
         '">' +
-        escapeHtml(
-          dinner
-            ? dinner +
-                (dinnerServ ? " · " + dinnerServ + "p" : "") +
-                (dinnerKcal != null ? " · " + dinnerKcal + " kcal/p" : "")
-            : "— nog open —"
-        ) +
+        escapeHtml(dinner ? dinner + (dinnerServ ? " · " + dinnerServ + "p" : "") : "— nog open —") +
         "</div>" +
+        (dinnerKcal != null ? kcalPillHtml(dinnerKcal, "meal") : "") +
         (extras.length
           ? '<div class="m-meta">' + escapeHtml(extras.join(" · ")) + "</div>"
           : meta.isToday
             ? '<div class="m-meta">Vandaag</div>'
             : "") +
-        "</div>";
+        "</div>" +
+        (dayTotalKcal(day) != null ? kcalPillHtml(dayTotalKcal(day), "day") : "");
       frags.push(btn);
     }
 
@@ -338,9 +367,9 @@
       '">' +
       (name || "Nog niets gepland") +
       (name && servings ? " · " + servings + "p" : "") +
-      (name && kcal != null ? " · " + kcal + " kcal/p" : "") +
       "</div>" +
       (recipe && recipe.rating ? starsHtml(recipe.rating) : "") +
+      (kcal != null ? kcalPillHtml(kcal, "meal") : "") +
       "</div></div>"
     );
   }
