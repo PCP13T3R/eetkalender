@@ -556,8 +556,41 @@ button {
 }
 
 .list-card h3 {
-  margin: 0 0 4px;
+  margin: 0;
   font-size: 1.05rem;
+}
+
+.recipe-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.recipe-title-row h3 {
+  flex: 1;
+  min-width: 0;
+}
+
+.recipe-title-row .kcal-pill {
+  flex-shrink: 0;
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.filter-grid select,
+.filter-grid input {
+  width: 100%;
+  min-height: 42px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  padding: 0 10px;
 }
 
 .list-card .meta {

@@ -293,9 +293,39 @@
     return state.recipes.find((r) => r.id === id) || null;
   }
 
-  function listRecipes(query) {
+  /** Most recent ISO day this recipe was planned, or null if never */
+  function getRecipeLastPlanned(recipeId) {
+    if (!recipeId) return null;
+    let best = null;
+    Object.keys(state.plan || {}).forEach((iso) => {
+      const day = state.plan[iso];
+      ["breakfast", "lunch", "dinner"].forEach((slot) => {
+        if (getSlotRecipeId(day, slot) === recipeId) {
+          if (!best || iso > best) best = iso;
+        }
+      });
+    });
+    return best;
+  }
+
+  function daysSinceLastPlanned(recipeId) {
+    const last = getRecipeLastPlanned(recipeId);
+    if (!last) return null;
+    const [y, m, d] = last.split("-").map(Number);
+    const a = new Date(y, m - 1, d);
+    const t = new Date();
+    const b = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+    return Math.round((b - a) / 86400000);
+  }
+
+  /**
+   * listRecipes(query, filters?)
+   * filters: { minKcal, maxKcal, minStars, maxStars, lastPlanned: 'any'|'never'|'7'|'14'|'30'|'90' }
+   */
+  function listRecipes(query, filters) {
     const q = (query || "").trim().toLowerCase();
-    let list = state.recipes.slice().sort((a, b) => a.name.localeCompare(b.name, "nl"));
+    const f = filters || {};
+    let list = state.recipes.slice();
     if (q) {
       list = list.filter(
         (r) =>
@@ -303,6 +333,56 @@
           (r.notes || "").toLowerCase().includes(q) ||
           (r.ingredients || []).some((i) => (i.name || "").toLowerCase().includes(q))
       );
+    }
+    if (f.minKcal != null && f.minKcal !== "") {
+      const min = Number(f.minKcal);
+      list = list.filter((r) => {
+        const k = getRecipeKcalPerPerson(r);
+        return k != null && k >= min;
+      });
+    }
+    if (f.maxKcal != null && f.maxKcal !== "") {
+      const max = Number(f.maxKcal);
+      list = list.filter((r) => {
+        const k = getRecipeKcalPerPerson(r);
+        return k != null && k <= max;
+      });
+    }
+    if (f.minStars != null && f.minStars !== "" && Number(f.minStars) > 0) {
+      const minS = Number(f.minStars);
+      list = list.filter((r) => (Number(r.rating) || 0) >= minS);
+    }
+    if (f.maxStars != null && f.maxStars !== "" && Number(f.maxStars) > 0) {
+      const maxS = Number(f.maxStars);
+      list = list.filter((r) => (Number(r.rating) || 0) <= maxS && (Number(r.rating) || 0) > 0);
+    }
+    if (f.lastPlanned && f.lastPlanned !== "any") {
+      if (f.lastPlanned === "never") {
+        list = list.filter((r) => !getRecipeLastPlanned(r.id));
+      } else {
+        const minDays = Number(f.lastPlanned);
+        list = list.filter((r) => {
+          const d = daysSinceLastPlanned(r.id);
+          // never used counts as "long ago"
+          if (d == null) return true;
+          return d >= minDays;
+        });
+      }
+    }
+
+    // sort: name, or by last planned if that filter is active
+    if (f.lastPlanned && f.lastPlanned !== "any" && f.lastPlanned !== "never") {
+      list.sort((a, b) => {
+        const da = daysSinceLastPlanned(a.id);
+        const db = daysSinceLastPlanned(b.id);
+        const va = da == null ? 99999 : da;
+        const vb = db == null ? 99999 : db;
+        return vb - va || a.name.localeCompare(b.name, "nl");
+      });
+    } else if (f.lastPlanned === "never") {
+      list.sort((a, b) => a.name.localeCompare(b.name, "nl"));
+    } else {
+      list.sort((a, b) => a.name.localeCompare(b.name, "nl"));
     }
     return list;
   }
@@ -739,6 +819,8 @@
     changePin,
     getRecipe,
     listRecipes,
+    getRecipeLastPlanned,
+    daysSinceLastPlanned,
     saveRecipe,
     deleteRecipe,
     setRating,

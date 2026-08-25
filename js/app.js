@@ -128,8 +128,9 @@
     if (kcal == null) return "";
     const cls = kind === "day" ? "kcal-pill day" : "kcal-pill meal";
     // Day total = sum of per-person meal kcals; meal pill = per person
-    const suffix = kind === "day" ? " kcal" : " kcal/p";
-    return '<span class="' + cls + '" aria-label="' + kcal + suffix + '">' + kcal + suffix + "</span>";
+    // Overal "Kcal" (per persoon op gerecht; dagtotaal = som per persoon)
+    const label = kcal + " Kcal";
+    return '<span class="' + cls + '" aria-label="' + label + '">' + label + "</span>";
   }
 
   /* ---------- navigation ---------- */
@@ -301,14 +302,14 @@
         const s = MealStore.getSlotServings(day, "breakfast");
         const kr = MealStore.getRecipe(MealStore.getSlotRecipeId(day, "breakfast"));
         const k = kr ? MealStore.getRecipeKcalPerPerson(kr) : null;
-        if (n) extras.push("Ontbijt: " + n + (s ? " (" + s + "p)" : "") + (k != null ? " · " + k + " kcal/p" : ""));
+        if (n) extras.push("Ontbijt: " + n + (s ? " (" + s + "p)" : "") + (k != null ? " · " + k + " Kcal" : ""));
       }
       if (day.showLunch && MealStore.getSlotRecipeId(day, "lunch")) {
         const n = slotRecipeName(day, "lunch");
         const s = MealStore.getSlotServings(day, "lunch");
         const kr = MealStore.getRecipe(MealStore.getSlotRecipeId(day, "lunch"));
         const k = kr ? MealStore.getRecipeKcalPerPerson(kr) : null;
-        if (n) extras.push("Lunch: " + n + (s ? " (" + s + "p)" : "") + (k != null ? " · " + k + " kcal/p" : ""));
+        if (n) extras.push("Lunch: " + n + (s ? " (" + s + "p)" : "") + (k != null ? " · " + k + " Kcal" : ""));
       }
 
       const btn = document.createElement("button");
@@ -414,7 +415,7 @@
         "<p>" +
         (r ? escapeHtml(r.name) : "Nog geen gerecht") +
         (r && r.rating ? " · " + "★".repeat(r.rating) : "") +
-        (kcal != null ? " · " + kcal + " kcal/p" : "") +
+        (kcal != null ? " · " + kcal + " Kcal" : "") +
         "</p>" +
         (r
           ? '<div class="field" style="margin-top:8px"><label>Aantal personen (recept basis: ' +
@@ -768,13 +769,26 @@
   }
 
   /* ---------- Recipes ---------- */
+  let recipeFilters = { minKcal: "", maxKcal: "", minStars: "", lastPlanned: "any" };
+
+  function getRecipeFiltersFromDom() {
+    return {
+      minKcal: ($("#flt-kcal-min") && $("#flt-kcal-min").value) || "",
+      maxKcal: ($("#flt-kcal-max") && $("#flt-kcal-max").value) || "",
+      minStars: ($("#flt-stars") && $("#flt-stars").value) || "",
+      lastPlanned: ($("#flt-planned") && $("#flt-planned").value) || "any",
+    };
+  }
+
   function renderRecipes() {
     const host = $("#recipe-list");
-    const list = MealStore.listRecipes(recipeQuery);
+    if (!host) return;
+    recipeFilters = getRecipeFiltersFromDom();
+    const list = MealStore.listRecipes(recipeQuery, recipeFilters);
     host.innerHTML = "";
     if (!list.length) {
       host.innerHTML =
-        '<div class="empty-state"><div class="big">🍲</div>Nog geen recepten.<br/>Voeg je eerste toe!</div>';
+        '<div class="empty-state"><div class="big">🍲</div>Geen recepten voor deze filters.<br/>Pas filters aan of voeg een recept toe.</div>';
       return;
     }
     list.forEach((r) => {
@@ -782,22 +796,32 @@
       btn.type = "button";
       btn.className = "list-card";
       const ingCount = (r.ingredients || []).length;
+      const kcal = MealStore.getRecipeKcalPerPerson(r);
+      const daysAgo = MealStore.daysSinceLastPlanned(r.id);
+      let plannedTxt = "Nog niet gepland";
+      if (daysAgo === 0) plannedTxt = "Vandaag gepland";
+      else if (daysAgo === 1) plannedTxt = "Gisteren gepland";
+      else if (daysAgo != null) plannedTxt = daysAgo + " dagen geleden";
+
       btn.innerHTML =
+        '<div class="recipe-title-row">' +
         "<h3>" +
         escapeHtml(r.name) +
         "</h3>" +
+        (kcal != null ? kcalPillHtml(kcal, "meal") : "") +
+        "</div>" +
         '<div class="meta">' +
         starsHtml(r.rating) +
         (r.timeMinutes ? " · " + r.timeMinutes + " min" : "") +
         " · " +
         (r.servingsBase || 2) +
         "p" +
-        (MealStore.getRecipeKcalPerPerson(r) != null
-          ? " · " + MealStore.getRecipeKcalPerPerson(r) + " kcal/p"
-          : "") +
         " · " +
         ingCount +
         " ingrediënten</div>" +
+        '<div class="meta" style="margin-top:4px">' +
+        escapeHtml(plannedTxt) +
+        "</div>" +
         (r.notes ? '<div class="meta" style="margin-top:4px">' + escapeHtml(r.notes) + "</div>" : "");
       btn.addEventListener("click", () => openRecipeEditor(r.id));
       host.appendChild(btn);
@@ -821,9 +845,9 @@
       '<div class="field"><label>Hoeveelheden voor (personen)</label><input id="r-servings" type="number" min="1" max="99" inputmode="numeric" value="' +
       (r && r.servingsBase != null ? r.servingsBase : 2) +
       '" /><p style="margin:6px 0 0;color:var(--muted);font-size:0.8rem">Basisportie van dit recept. Op een avond kies je hoeveel personen je kookt; boodschappen schalen mee.</p></div>' +
-      '<div class="field"><label>Kcal per persoon</label><input id="r-kcal" type="number" min="0" max="5000" inputmode="numeric" placeholder="bv. 650" value="' +
+      '<div class="field"><label>Kcal</label><input id="r-kcal" type="number" min="0" max="5000" inputmode="numeric" placeholder="bv. 650" value="' +
       (r && r.kcalPerPerson != null ? r.kcalPerPerson : "") +
-      '" /><p style="margin:6px 0 0;color:var(--muted);font-size:0.8rem">Per 1 persoon — wordt <strong>niet</strong> vermenigvuldigd als er meer personen eten. Zichtbaar in week- en maandkalender.</p></div>' +
+      '" /><p style="margin:6px 0 0;color:var(--muted);font-size:0.8rem">Per 1 persoon — niet vermenigvuldigd bij meer personen. Zichtbaar in week/maand als <strong>Kcal</strong>.</p></div>' +
       '<div class="field"><label>Score</label><div class="rating-picker" id="r-rating"></div></div>' +
       '<div class="section-title">Ingrediënten</div>' +
       '<div id="r-ings"></div>' +
@@ -1040,6 +1064,10 @@
 
     const checked = state.shopping.checked || {};
     const done = items.filter((i) => checked[i.key]).length;
+    const btnClearChecks = $("#btn-clear-checks");
+    if (btnClearChecks) {
+      btnClearChecks.classList.toggle("hidden", !(days && days.length));
+    }
     if (summary) {
       summary.textContent =
         items.length +
@@ -1278,11 +1306,35 @@ create policy "meal_calendar_write"
     });
     $("#btn-new-recipe").addEventListener("click", () => openRecipeEditor(null));
 
-    $("#btn-clear-checks").addEventListener("click", () => {
-      MealStore.clearShoppingChecks();
-      renderShoppingList();
-      toast("Afvinkingen gewist");
+    const btnClearChecks = $("#btn-clear-checks");
+    if (btnClearChecks) {
+      btnClearChecks.addEventListener("click", () => {
+        if (!confirm("Afvinken van boodschappenlijst wissen?\n\nJa = alle vinkjes weg.\nNee = annuleer.")) {
+          return;
+        }
+        MealStore.clearShoppingChecks();
+        renderShoppingList();
+        toast("Afvinkingen gewist");
+      });
+    }
+
+    ["flt-kcal-min", "flt-kcal-max", "flt-stars", "flt-planned"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener("change", () => renderRecipes());
+      el.addEventListener("input", () => renderRecipes());
     });
+    const btnClrFlt = $("#btn-clear-recipe-filters");
+    if (btnClrFlt) {
+      btnClrFlt.addEventListener("click", () => {
+        if ($("#flt-kcal-min")) $("#flt-kcal-min").value = "";
+        if ($("#flt-kcal-max")) $("#flt-kcal-max").value = "";
+        if ($("#flt-stars")) $("#flt-stars").value = "";
+        if ($("#flt-planned")) $("#flt-planned").value = "any";
+        renderRecipes();
+        toast("Filters gewist");
+      });
+    }
 
     const btnClearDays = $("#btn-clear-days");
     if (btnClearDays) {

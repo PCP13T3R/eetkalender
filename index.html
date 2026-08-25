@@ -84,18 +84,56 @@
           <input type="search" id="recipe-search" placeholder="Zoek recepten…" enterkeyhint="search" />
           <button type="button" class="btn btn-primary" id="btn-new-recipe">+</button>
         </div>
+        <div class="settings-card" id="recipe-filters" style="margin-bottom: 12px; padding: 12px">
+          <div style="font-weight: 700; font-size: 0.88rem; margin-bottom: 8px">Filters</div>
+          <div class="filter-grid">
+            <div class="field" style="margin: 0">
+              <label>Kcal min</label>
+              <input id="flt-kcal-min" type="number" min="0" placeholder="bv. 300" inputmode="numeric" />
+            </div>
+            <div class="field" style="margin: 0">
+              <label>Kcal max</label>
+              <input id="flt-kcal-max" type="number" min="0" placeholder="bv. 700" inputmode="numeric" />
+            </div>
+            <div class="field" style="margin: 0">
+              <label>Min. sterren</label>
+              <select id="flt-stars">
+                <option value="">Alle</option>
+                <option value="1">★+</option>
+                <option value="2">★★+</option>
+                <option value="3">★★★+</option>
+                <option value="4">★★★★+</option>
+                <option value="5">★★★★★</option>
+              </select>
+            </div>
+            <div class="field" style="margin: 0">
+              <label>Laatst gepland</label>
+              <select id="flt-planned">
+                <option value="any">Alle</option>
+                <option value="never">Nog nooit</option>
+                <option value="7">≥ 7 dagen geleden</option>
+                <option value="14">≥ 14 dagen geleden</option>
+                <option value="30">≥ 30 dagen geleden</option>
+                <option value="90">≥ 90 dagen geleden</option>
+              </select>
+            </div>
+          </div>
+          <div class="btn-row" style="margin-top: 10px">
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-clear-recipe-filters">Filters wissen</button>
+          </div>
+        </div>
         <div id="recipe-list"></div>
       </section>
 
       <!-- Shopping -->
       <section class="screen" data-tab="shopping" id="tab-shopping">
         <p style="margin: 0 0 8px; color: var(--muted); font-size: 0.92rem">
-          Selecteer dagen van <strong>vandaag tot +7 dagen</strong> (1 week vooruit). Recepten × personen + extra’s.
+          <strong>Selecteer dagen voor boodschappenlijst</strong>
+          (vandaag t.e.m. +7 dagen). Recepten × personen + extra’s.
         </p>
         <div class="day-pick" id="shop-day-pick"></div>
         <div class="btn-row" style="margin-bottom: 12px">
           <button type="button" class="btn btn-secondary btn-sm" id="btn-clear-days">Dagen wissen</button>
-          <button type="button" class="btn btn-secondary btn-sm" id="btn-clear-checks">Afvinkingen wissen</button>
         </div>
 
         <div class="settings-card" style="margin-bottom: 12px">
@@ -115,6 +153,7 @@
           </div>
           <div class="btn-row" style="margin-top: 10px">
             <button type="button" class="btn btn-secondary btn-sm" id="btn-clear-extras">Extra’s wissen</button>
+            <button type="button" class="btn btn-secondary btn-sm hidden" id="btn-clear-checks">Afvinkingen wissen</button>
           </div>
         </div>
 
@@ -273,7 +312,7 @@
     <script src="js/app.js"></script>
     <script>
       // App-versie: verhoog bij releases (zichtbaar in Instellingen)
-      window.MEAL_APP_VERSION = "2026.08.25-11";
+      window.MEAL_APP_VERSION = "2026.08.25-12";
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {
           navigator.serviceWorker.register("./sw.js").then((reg) => {
