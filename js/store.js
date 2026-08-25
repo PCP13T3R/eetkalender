@@ -68,7 +68,8 @@
         notes: "Klassieker — 20 min pruttelen.",
         timeMinutes: 35,
         rating: 5,
-        servingsBase: 4,
+        servingsBase: 2,
+        kcalPerPerson: null,
         ingredients: [
           { name: "spaghetti", qty: 400, unit: "g" },
           { name: "gehakt", qty: 500, unit: "g" },
@@ -86,7 +87,8 @@
         notes: "Restjes kip werken perfect.",
         timeMinutes: 40,
         rating: 4,
-        servingsBase: 4,
+        servingsBase: 2,
+        kcalPerPerson: null,
         ingredients: [
           { name: "kippendijen", qty: 400, unit: "g" },
           { name: "wortel", qty: 2, unit: "stuk" },
@@ -103,7 +105,8 @@
         notes: "Snel doordeweeks.",
         timeMinutes: 25,
         rating: 4,
-        servingsBase: 4,
+        servingsBase: 2,
+        kcalPerPerson: null,
         ingredients: [
           { name: "rijst", qty: 300, unit: "g" },
           { name: "roerbakgroenten", qty: 400, unit: "g" },
@@ -119,7 +122,8 @@
         notes: "Voor ontbijt of avond.",
         timeMinutes: 20,
         rating: 5,
-        servingsBase: 4,
+        servingsBase: 2,
+        kcalPerPerson: null,
         ingredients: [
           { name: "bloem", qty: 250, unit: "g" },
           { name: "melk", qty: 500, unit: "ml" },
@@ -193,9 +197,14 @@
       if (!state.plan || typeof state.plan !== "object") state.plan = {};
       if (!state.shopping) state.shopping = { selectedDays: [], checked: {}, extras: [], generatedAt: null };
       if (!Array.isArray(state.shopping.extras)) state.shopping.extras = [];
-      // migrate recipes without servingsBase
+      // migrate recipes without servingsBase / kcal
       state.recipes.forEach((r) => {
-        if (r.servingsBase == null || !(Number(r.servingsBase) > 0)) r.servingsBase = 4;
+        if (r.servingsBase == null || !(Number(r.servingsBase) > 0)) r.servingsBase = 2;
+        if (r.kcalPerPerson == null || r.kcalPerPerson === "") r.kcalPerPerson = null;
+        else {
+          const k = Number(r.kcalPerPerson);
+          r.kcalPerPerson = !Number.isNaN(k) && k > 0 ? k : null;
+        }
       });
       return state;
     } catch (e) {
@@ -310,8 +319,13 @@
 
     const servingsBase = Math.max(
       1,
-      Math.round(Number(recipe.servingsBase != null && recipe.servingsBase !== "" ? recipe.servingsBase : 4) || 4)
+      Math.round(Number(recipe.servingsBase != null && recipe.servingsBase !== "" ? recipe.servingsBase : 2) || 2)
     );
+    let kcalPerPerson = null;
+    if (recipe.kcalPerPerson !== "" && recipe.kcalPerPerson != null) {
+      const k = Number(recipe.kcalPerPerson);
+      if (!Number.isNaN(k) && k > 0) kcalPerPerson = Math.round(k);
+    }
     let savedId = recipe.id || null;
     if (recipe.id) {
       const idx = state.recipes.findIndex((r) => r.id === recipe.id);
@@ -326,6 +340,7 @@
               : Number(recipe.timeMinutes),
           rating: clampRating(recipe.rating ?? state.recipes[idx].rating),
           servingsBase,
+          kcalPerPerson,
           ingredients: cleanIngredients,
           updatedAt: now,
         };
@@ -343,6 +358,7 @@
             : Number(recipe.timeMinutes),
         rating: clampRating(recipe.rating || 0),
         servingsBase,
+        kcalPerPerson,
         ingredients: cleanIngredients,
         updatedAt: now,
       });
@@ -386,13 +402,20 @@
     if (!s) return null;
     if (s.servings != null && s.servings > 0) return s.servings;
     const recipe = getRecipe(s.recipeId);
-    const base = recipe && recipe.servingsBase ? Number(recipe.servingsBase) : 4;
-    return base > 0 ? base : 4;
+    const base = recipe && recipe.servingsBase ? Number(recipe.servingsBase) : 2;
+    return base > 0 ? base : 2;
   }
 
   function getRecipeServingsBase(recipe) {
-    const b = recipe && recipe.servingsBase != null ? Number(recipe.servingsBase) : 4;
-    return b > 0 ? b : 4;
+    const b = recipe && recipe.servingsBase != null ? Number(recipe.servingsBase) : 2;
+    return b > 0 ? b : 2;
+  }
+
+  /** Kcal per persoon (niet vermenigvuldigen met aantal personen) */
+  function getRecipeKcalPerPerson(recipe) {
+    if (!recipe || recipe.kcalPerPerson == null || recipe.kcalPerPerson === "") return null;
+    const k = Number(recipe.kcalPerPerson);
+    return !Number.isNaN(k) && k > 0 ? Math.round(k) : null;
   }
 
   function setRating(recipeId, rating) {
@@ -725,6 +748,7 @@
     getSlotRecipeId,
     getSlotServings,
     getRecipeServingsBase,
+    getRecipeKcalPerPerson,
     normalizeSlot,
     toggleExtraSlot,
     copySlot,

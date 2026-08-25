@@ -90,25 +90,34 @@
       <!-- Shopping -->
       <section class="screen" data-tab="shopping" id="tab-shopping">
         <p style="margin: 0 0 8px; color: var(--muted); font-size: 0.92rem">
-          Vink dagen aan (recepten × personen). Voeg ook losse boodschappen toe. Tik om af te vinken.
+          Selecteer dagen van <strong>vandaag tot +7 dagen</strong> (1 week vooruit). Recepten × personen + extra’s.
         </p>
         <div class="day-pick" id="shop-day-pick"></div>
+        <div class="btn-row" style="margin-bottom: 12px">
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-clear-days">Dagen wissen</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-clear-checks">Afvinkingen wissen</button>
+        </div>
 
         <div class="settings-card" style="margin-bottom: 12px">
           <h3 style="margin: 0 0 8px; font-size: 1rem">Extra boodschappen</h3>
-          <div class="chip-row" id="shop-presets" style="margin-bottom: 10px"></div>
+          <div class="field" style="margin-bottom: 10px">
+            <label for="shop-preset-select">Snel toevoegen</label>
+            <select id="shop-preset-select" style="width: 100%; min-height: 46px; border-radius: 14px; border: 1px solid var(--line); background: var(--bg-card); padding: 0 12px">
+              <option value="">Kies een item…</option>
+            </select>
+          </div>
+          <p style="margin: 0 0 8px; color: var(--muted); font-size: 0.82rem">Of manueel:</p>
           <div class="ing-row" style="grid-template-columns: 1.4fr 0.6fr 0.7fr auto">
-            <input id="extra-name" placeholder="Item (bv. WC-papier)" />
+            <input id="extra-name" placeholder="Item" />
             <input id="extra-qty" placeholder="hoev." inputmode="decimal" />
             <input id="extra-unit" placeholder="eenheid" />
             <button type="button" class="btn btn-sm btn-primary" id="btn-add-extra">+</button>
           </div>
+          <div class="btn-row" style="margin-top: 10px">
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-clear-extras">Extra’s wissen</button>
+          </div>
         </div>
 
-        <div class="btn-row" style="margin-bottom: 12px">
-          <button type="button" class="btn btn-secondary" id="btn-clear-checks">Afvinkingen wissen</button>
-          <button type="button" class="btn btn-secondary" id="btn-clear-extras">Extra’s wissen</button>
-        </div>
         <p id="shop-summary" class="meta" style="color: var(--muted); font-size: 0.88rem; margin: 0 0 10px"></p>
         <div id="shop-list"></div>
       </section>
@@ -264,7 +273,7 @@
     <script src="js/app.js"></script>
     <script>
       // App-versie: verhoog bij releases (zichtbaar in Instellingen)
-      window.MEAL_APP_VERSION = "2026.08.25-7";
+      window.MEAL_APP_VERSION = "2026.08.25-9";
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {
           navigator.serviceWorker.register("./sw.js").then((reg) => {
