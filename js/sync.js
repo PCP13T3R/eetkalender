@@ -162,7 +162,8 @@
       }
 
       await pull();
-      const ms = (global.MEAL_CONFIG && global.MEAL_CONFIG.syncIntervalMs) || 8000;
+      // Default 3s pull + realtime channel (if enabled in Supabase)
+      const ms = (global.MEAL_CONFIG && global.MEAL_CONFIG.syncIntervalMs) || 3000;
       pullTimer = setInterval(() => {
         if (navigator.onLine) pull().catch(() => {});
       }, ms);
@@ -226,75 +227,245 @@
     }
   }
 
-  async function pull() {
-    if (!client) return;
-    const { data, error } = await client
-      .from("meal_calendar_state")
-      .select("payload, updated_at")
-      .eq("id", 1)
-      .maybeSingle();
+  function ts(iso) {
+    if (!iso) return 0;
+    const t = new Date(iso).getTime();
+    return Number.isFinite(t) ? t : 0;
+  }
 
-    if (error) {
-      setStatus({ mode: "cloud", message: "Sync fout: " + error.message });
-      return;
-    }
+  function arrById(list) {
+    const m = new Map();
+    (list || []).forEach((item) => {
+      if (!item || !item.id) return;
+      const prev = m.get(item.id);
+      if (!prev || ts(item.updatedAt) >= ts(prev.updatedAt)) m.set(item.id, item);
+    });
+    return m;
+  }
 
-    if (!data || !data.payload || (typeof data.payload === "object" && !Object.keys(data.payload).length)) {
-      await push(MealStore.get(), true);
-      setStatus({ mode: "cloud", message: "Cloud klaargezet met lokale data", lastSync: new Date().toISOString() });
-      return;
-    }
+  /**
+   * Merge local + remote so partner edits are not wiped (last-write-wins per recipe / day / shopping piece).
+   */
+  function mergeStates(local, remote, remoteUpdatedAt, localUpdatedAt) {
+    const remoteNewer = ts(remoteUpdatedAt) >= ts(localUpdatedAt);
+    const base = remoteNewer ? remote : local;
+    const other = remoteNewer ? local : remote;
 
-    const local = MealStore.get();
-    const remoteUpdated = data.updated_at ? new Date(data.updated_at).getTime() : 0;
-    const localUpdated = local.meta && local.meta.updatedAt ? new Date(local.meta.updatedAt).getTime() : 0;
+    // Recipes: union by id, keep newer updatedAt
+    const recipesMap = arrById([].concat((base && base.recipes) || [], (other && other.recipes) || []));
+    // also keep recipes without colliding ids from both
+    const recipes = Array.from(recipesMap.values()).sort((a, b) =>
+      String(a.name || "").localeCompare(String(b.name || ""), "nl")
+    );
 
-    if (remoteUpdated >= localUpdated) {
-      MealStore.replaceState(data.payload, { unlock: local.unlocked });
-      // Re-apply configured family PIN after cloud pull (pinVersion / forceDefaultPin)
-      if (MealStore.ensurePinInitialized) {
-        await MealStore.ensurePinInitialized();
-      }
-      setStatus({ mode: "cloud", message: "Gesynchroniseerd", lastSync: new Date().toISOString() });
-    } else {
-      if (MealStore.ensurePinInitialized) {
-        await MealStore.ensurePinInitialized();
-      }
-      await push(MealStore.get(), true);
-      setStatus({
-        mode: "cloud",
-        message: "Lokaal → cloud geüpload",
-        lastSync: new Date().toISOString(),
+    // Plan: per day — merge meals[] by id; fallback legacy slots
+    const plan = {};
+    const days = new Set([
+      ...Object.keys((local && local.plan) || {}),
+      ...Object.keys((remote && remote.plan) || {}),
+    ]);
+    days.forEach((day) => {
+      const L = (local.plan && local.plan[day]) || {};
+      const R = (remote.plan && remote.plan[day]) || {};
+      const mealMap = new Map();
+      [].concat(L.meals || [], R.meals || []).forEach((m) => {
+        if (!m) return;
+        const id = m.id || m.slot + ":" + (m.label || "") + ":" + (m.recipeId || "");
+        const prev = mealMap.get(id);
+        if (!prev) mealMap.set(id, Object.assign({}, m));
+        else {
+          // prefer entry with recipe
+          if (!prev.recipeId && m.recipeId) mealMap.set(id, Object.assign({}, m));
+          else if (remoteNewer && m.recipeId) mealMap.set(id, Object.assign({}, m));
+        }
       });
+      let meals = Array.from(mealMap.values());
+      if (!meals.length) {
+        // legacy merge
+        const pick = (slot) => {
+          const lv = L[slot];
+          const rv = R[slot];
+          if (lv == null || lv === "") return rv != null ? rv : null;
+          if (rv == null || rv === "") return lv;
+          return remoteNewer ? rv : lv;
+        };
+        plan[day] = {
+          dinner: pick("dinner"),
+          breakfast: pick("breakfast"),
+          lunch: pick("lunch"),
+          showBreakfast: !!(L.showBreakfast || R.showBreakfast || pick("breakfast")),
+          showLunch: !!(L.showLunch || R.showLunch || pick("lunch")),
+        };
+      } else {
+        if (!meals.some((m) => m.slot === "dinner")) {
+          meals.push({
+            id: "d-" + day,
+            slot: "dinner",
+            label: "",
+            recipeId: null,
+            servings: null,
+          });
+        }
+        plan[day] = {
+          meals,
+          dinner: null,
+          breakfast: null,
+          lunch: null,
+          showBreakfast: meals.some((m) => m.slot === "breakfast"),
+          showLunch: meals.some((m) => m.slot === "lunch"),
+        };
+      }
+    });
+
+    // Shopping: merge arrays by id where possible; prefer newer doc for selectedDays if conflict
+    const Ls = (local && local.shopping) || {};
+    const Rs = (remote && remote.shopping) || {};
+    const mergeIdList = (a, b) => {
+      const m = new Map();
+      [].concat(a || [], b || []).forEach((x) => {
+        if (!x) return;
+        const id = x.id || x.key || JSON.stringify(x);
+        if (!m.has(id)) m.set(id, x);
+      });
+      return Array.from(m.values());
+    };
+    const shopping = {
+      selectedDays: remoteNewer
+        ? Rs.selectedDays || Ls.selectedDays || []
+        : Ls.selectedDays || Rs.selectedDays || [],
+      extras: mergeIdList(Ls.extras, Rs.extras),
+      backlog: mergeIdList(Ls.backlog, Rs.backlog),
+      cart: mergeIdList(Ls.cart, Rs.cart),
+      home: mergeIdList(Ls.home, Rs.home),
+      shopPresets:
+        Array.isArray(Rs.shopPresets) || Array.isArray(Ls.shopPresets)
+          ? mergeIdList(Ls.shopPresets, Rs.shopPresets)
+          : null,
+      checked: { ...(Ls.checked || {}), ...(Rs.checked || {}) },
+      generatedAt: remoteNewer ? Rs.generatedAt || Ls.generatedAt : Ls.generatedAt || Rs.generatedAt,
+    };
+
+    const meta = {
+      createdAt:
+        (local.meta && local.meta.createdAt) ||
+        (remote.meta && remote.meta.createdAt) ||
+        new Date().toISOString(),
+      updatedAt: new Date(
+        Math.max(ts(localUpdatedAt), ts(remoteUpdatedAt), Date.now())
+      ).toISOString(),
+    };
+
+    return {
+      version: Math.max(local.version || 1, remote.version || 1),
+      pinHash: local.pinHash || remote.pinHash || null,
+      unlocked: !!(local && local.unlocked),
+      recipes,
+      plan,
+      shopping,
+      meta,
+    };
+  }
+
+  let pulling = false;
+  let pushInFlight = false;
+  let pushAgain = false;
+
+  async function pull() {
+    if (!client || pulling) return;
+    pulling = true;
+    try {
+      const { data, error } = await client
+        .from("meal_calendar_state")
+        .select("payload, updated_at")
+        .eq("id", 1)
+        .maybeSingle();
+
+      if (error) {
+        setStatus({ mode: "cloud", message: "Sync fout: " + error.message });
+        return;
+      }
+
+      if (!data || !data.payload || (typeof data.payload === "object" && !Object.keys(data.payload).length)) {
+        await push(MealStore.get(), true);
+        setStatus({ mode: "cloud", message: "Cloud klaargezet met lokale data", lastSync: new Date().toISOString() });
+        return;
+      }
+
+      const local = MealStore.get();
+      const remote = data.payload;
+      const remoteUpdated = data.updated_at || (remote.meta && remote.meta.updatedAt);
+      const localUpdated = local.meta && local.meta.updatedAt;
+
+      // Always merge so partner recipes/plan are not lost
+      const merged = mergeStates(local, remote, remoteUpdated, localUpdated);
+      const before = JSON.stringify({
+        r: (local.recipes || []).map((x) => x.id + ":" + (x.updatedAt || "")),
+        p: Object.keys(local.plan || {}).sort(),
+        s: local.shopping,
+      });
+      const after = JSON.stringify({
+        r: (merged.recipes || []).map((x) => x.id + ":" + (x.updatedAt || "")),
+        p: Object.keys(merged.plan || {}).sort(),
+        s: merged.shopping,
+      });
+
+      if (before !== after) {
+        MealStore.replaceState(merged, { unlock: local.unlocked, silent: false });
+        if (MealStore.ensurePinInitialized) await MealStore.ensurePinInitialized();
+        // Write merge back so both sides converge
+        await push(MealStore.get(), true);
+        setStatus({ mode: "cloud", message: "Gesynchroniseerd (samenvoegen)", lastSync: new Date().toISOString() });
+      } else {
+        if (MealStore.ensurePinInitialized) await MealStore.ensurePinInitialized();
+        setStatus({ mode: "cloud", message: "Cloud up-to-date", lastSync: new Date().toISOString() });
+      }
+    } finally {
+      pulling = false;
     }
   }
 
   async function push(state, force) {
     if (!client) return;
+    if (pushInFlight) {
+      pushAgain = true;
+      return;
+    }
     const now = Date.now();
-    if (!force && now - lastPush < 500) return;
+    if (!force && now - lastPush < 200) return;
     lastPush = now;
+    pushInFlight = true;
+    try {
+      const payload = { ...state, unlocked: false };
+      // bump meta so peers see change
+      if (!payload.meta) payload.meta = {};
+      payload.meta.updatedAt = new Date().toISOString();
+      const { error } = await client.from("meal_calendar_state").upsert({
+        id: 1,
+        payload,
+        updated_at: payload.meta.updatedAt,
+      });
 
-    const payload = { ...state, unlocked: false };
-    const { error } = await client.from("meal_calendar_state").upsert({
-      id: 1,
-      payload,
-      updated_at: new Date().toISOString(),
-    });
-
-    if (error) {
-      setStatus({ mode: "cloud", message: "Upload fout: " + error.message });
-    } else {
-      setStatus({ mode: "cloud", message: "Opgeslagen in cloud", lastSync: new Date().toISOString() });
+      if (error) {
+        setStatus({ mode: "cloud", message: "Upload fout: " + error.message });
+      } else {
+        setStatus({ mode: "cloud", message: "Opgeslagen in cloud", lastSync: new Date().toISOString() });
+      }
+    } finally {
+      pushInFlight = false;
+      if (pushAgain) {
+        pushAgain = false;
+        push(MealStore.get(), true).catch(() => {});
+      }
     }
   }
 
   function queuePush(state) {
     if (!client) return;
     clearTimeout(pushTimer);
+    // Snel na elke wijziging (recept opslaan, planning, …)
     pushTimer = setTimeout(() => {
-      push(state, true).catch((e) => console.error(e));
-    }, 400);
+      push(state || MealStore.get(), true).catch((e) => console.error(e));
+    }, 150);
   }
 
   async function forceSyncNow() {

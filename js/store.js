@@ -51,12 +51,175 @@
 
   function emptyDay() {
     return {
+      meals: [
+        {
+          id: uid(),
+          slot: "dinner",
+          label: "", // "" = iedereen; Mama / Papa / Kids / custom
+          recipeId: null,
+          servings: null,
+        },
+      ],
+      // legacy (migrated into meals on read)
       dinner: null,
       breakfast: null,
       lunch: null,
       showBreakfast: false,
       showLunch: false,
     };
+  }
+
+  const DEFAULT_MEAL_LABELS = ["Mama", "Papa", "Kids"];
+
+  function migrateDayMeals(day) {
+    if (!day || typeof day !== "object") return emptyDay();
+    if (Array.isArray(day.meals) && day.meals.length) {
+      day.meals = day.meals.map((m) => ({
+        id: m.id || uid(),
+        slot: ["breakfast", "lunch", "dinner"].includes(m.slot) ? m.slot : "dinner",
+        label: m.label != null ? String(m.label).trim() : "",
+        recipeId: m.recipeId || null,
+        servings:
+          m.servings == null || m.servings === ""
+            ? null
+            : Number(m.servings) > 0
+              ? Number(m.servings)
+              : null,
+      }));
+      if (!day.meals.some((m) => m.slot === "dinner")) {
+        day.meals.push({ id: uid(), slot: "dinner", label: "", recipeId: null, servings: null });
+      }
+      syncLegacyFromMeals(day);
+      return day;
+    }
+    // Legacy → meals
+    day.meals = [];
+    ["breakfast", "lunch", "dinner"].forEach((slot) => {
+      const n = normalizeSlot(day[slot]);
+      const show =
+        slot === "dinner" || (slot === "breakfast" ? !!day.showBreakfast : !!day.showLunch);
+      if (n) {
+        day.meals.push({
+          id: uid(),
+          slot,
+          label: "",
+          recipeId: n.recipeId,
+          servings: n.servings,
+        });
+      } else if (show) {
+        day.meals.push({ id: uid(), slot, label: "", recipeId: null, servings: null });
+      }
+    });
+    if (!day.meals.some((m) => m.slot === "dinner")) {
+      day.meals.push({ id: uid(), slot: "dinner", label: "", recipeId: null, servings: null });
+    }
+    syncLegacyFromMeals(day);
+    return day;
+  }
+
+  function syncLegacyFromMeals(day) {
+    const first = (slot) => (day.meals || []).find((m) => m.slot === slot && !m.label) ||
+      (day.meals || []).find((m) => m.slot === slot);
+    const b = first("breakfast");
+    const l = first("lunch");
+    const d = first("dinner");
+    day.showBreakfast = (day.meals || []).some((m) => m.slot === "breakfast");
+    day.showLunch = (day.meals || []).some((m) => m.slot === "lunch");
+    day.breakfast = b && b.recipeId ? { recipeId: b.recipeId, servings: b.servings } : null;
+    day.lunch = l && l.recipeId ? { recipeId: l.recipeId, servings: l.servings } : null;
+    day.dinner = d && d.recipeId ? { recipeId: d.recipeId, servings: d.servings } : null;
+  }
+
+  function listMeals(day, slot) {
+    migrateDayMeals(day);
+    let list = day.meals || [];
+    if (slot) list = list.filter((m) => m.slot === slot);
+    return list.slice();
+  }
+
+  function getMeal(day, mealId) {
+    migrateDayMeals(day);
+    return (day.meals || []).find((m) => m.id === mealId) || null;
+  }
+
+  function addMeal(iso, slot, label) {
+    const day = getDay(iso);
+    if (!["breakfast", "lunch", "dinner"].includes(slot)) return null;
+    const meal = {
+      id: uid(),
+      slot,
+      label: label != null ? String(label).trim() : "",
+      recipeId: null,
+      servings: null,
+    };
+    day.meals.push(meal);
+    syncLegacyFromMeals(day);
+    persist();
+    return meal.id;
+  }
+
+  function removeMeal(iso, mealId) {
+    const day = getDay(iso);
+    const meals = day.meals || [];
+    const target = meals.find((m) => m.id === mealId);
+    if (!target) return;
+    // Keep at least one dinner
+    if (target.slot === "dinner" && meals.filter((m) => m.slot === "dinner").length <= 1) {
+      target.recipeId = null;
+      target.servings = null;
+      target.label = "";
+      syncLegacyFromMeals(day);
+      persist();
+      return;
+    }
+    day.meals = meals.filter((m) => m.id !== mealId);
+    syncLegacyFromMeals(day);
+    persist();
+  }
+
+  function setMealRecipe(iso, mealId, recipeId, servings) {
+    const day = getDay(iso);
+    const meal = getMeal(day, mealId);
+    if (!meal) return;
+    if (!recipeId) {
+      meal.recipeId = null;
+      meal.servings = null;
+    } else {
+      const recipe = getRecipe(recipeId);
+      const base = getRecipeServingsBase(recipe);
+      let s = servings == null || servings === "" ? base : Number(servings);
+      if (!(s > 0)) s = base;
+      meal.recipeId = recipeId;
+      meal.servings = s;
+    }
+    syncLegacyFromMeals(day);
+    persist();
+  }
+
+  function setMealServings(iso, mealId, servings) {
+    const day = getDay(iso);
+    const meal = getMeal(day, mealId);
+    if (!meal || !meal.recipeId) return;
+    const recipe = getRecipe(meal.recipeId);
+    const base = getRecipeServingsBase(recipe);
+    let s = Number(servings);
+    if (!(s > 0)) s = base;
+    meal.servings = s;
+    syncLegacyFromMeals(day);
+    persist();
+  }
+
+  function setMealLabel(iso, mealId, label) {
+    const day = getDay(iso);
+    const meal = getMeal(day, mealId);
+    if (!meal) return;
+    meal.label = label != null ? String(label).trim() : "";
+    syncLegacyFromMeals(day);
+    persist();
+  }
+
+  function getMealLabels() {
+    return DEFAULT_MEAL_LABELS.slice();
   }
 
   function seedRecipes() {
@@ -201,13 +364,16 @@
       if (!state.plan || typeof state.plan !== "object") state.plan = {};
       if (!state.shopping) state.shopping = defaultState().shopping;
       migrateShopping(state.shopping);
-      // migrate recipes without servingsBase / kcal
+      // migrate recipes without servingsBase / kcal + fix NaN qty
       state.recipes.forEach((r) => {
         if (r.servingsBase == null || !(Number(r.servingsBase) > 0)) r.servingsBase = 2;
         if (r.kcalPerPerson == null || r.kcalPerPerson === "") r.kcalPerPerson = null;
         else {
           const k = Number(r.kcalPerPerson);
           r.kcalPerPerson = !Number.isNaN(k) && k > 0 ? k : null;
+        }
+        if (Array.isArray(r.ingredients)) {
+          r.ingredients = cleanIngredientList(r.ingredients);
         }
       });
       return state;
@@ -247,6 +413,12 @@
     if (!state.plan) state.plan = {};
     if (!state.shopping) state.shopping = defaultState().shopping;
     migrateShopping(state.shopping);
+    if (Array.isArray(state.recipes)) {
+      state.recipes.forEach((r) => {
+        if (Array.isArray(r.ingredients)) r.ingredients = cleanIngredientList(r.ingredients);
+        if (r.servingsBase == null || !(Number(r.servingsBase) > 0)) r.servingsBase = 2;
+      });
+    }
     state.unlocked = unlock ? true : wasUnlocked;
     if (!silent) {
       try {
@@ -315,8 +487,9 @@
     let best = null;
     Object.keys(state.plan || {}).forEach((iso) => {
       const day = state.plan[iso];
-      ["breakfast", "lunch", "dinner"].forEach((slot) => {
-        if (getSlotRecipeId(day, slot) === recipeId) {
+      migrateDayMeals(day);
+      (day.meals || []).forEach((m) => {
+        if (m.recipeId === recipeId) {
           if (!best || iso > best) best = iso;
         }
       });
@@ -405,13 +578,7 @@
 
   function saveRecipe(recipe) {
     const now = new Date().toISOString();
-    const cleanIngredients = (recipe.ingredients || [])
-      .map((i) => ({
-        name: String(i.name || "").trim(),
-        qty: i.qty === "" || i.qty == null ? null : Number(i.qty),
-        unit: String(i.unit || "").trim(),
-      }))
-      .filter((i) => i.name);
+    const cleanIngredients = cleanIngredientList(recipe.ingredients);
 
     const servingsBase = Math.max(
       1,
@@ -465,11 +632,19 @@
 
   function deleteRecipe(id) {
     state.recipes = state.recipes.filter((r) => r.id !== id);
-    Object.keys(state.plan).forEach((day) => {
-      const p = state.plan[day];
+    Object.keys(state.plan).forEach((dayIso) => {
+      const p = state.plan[dayIso];
+      migrateDayMeals(p);
+      (p.meals || []).forEach((m) => {
+        if (m.recipeId === id) {
+          m.recipeId = null;
+          m.servings = null;
+        }
+      });
       ["breakfast", "lunch", "dinner"].forEach((slot) => {
         if (getSlotRecipeId(p, slot) === id) p[slot] = null;
       });
+      syncLegacyFromMeals(p);
     });
     persist();
   }
@@ -488,16 +663,30 @@
     return null;
   }
 
+  /** First meal of slot (prefer unlabeled = “iedereen”) */
+  function primaryMeal(day, slot) {
+    migrateDayMeals(day);
+    return (
+      (day.meals || []).find((m) => m.slot === slot && !m.label) ||
+      (day.meals || []).find((m) => m.slot === slot) ||
+      null
+    );
+  }
+
   function getSlotRecipeId(day, slot) {
-    const s = normalizeSlot(day && day[slot]);
-    return s ? s.recipeId : null;
+    if (!day) return null;
+    migrateDayMeals(day);
+    const m = primaryMeal(day, slot);
+    return m && m.recipeId ? m.recipeId : null;
   }
 
   function getSlotServings(day, slot) {
-    const s = normalizeSlot(day && day[slot]);
-    if (!s) return null;
-    if (s.servings != null && s.servings > 0) return s.servings;
-    const recipe = getRecipe(s.recipeId);
+    if (!day) return null;
+    migrateDayMeals(day);
+    const m = primaryMeal(day, slot);
+    if (!m || !m.recipeId) return null;
+    if (m.servings != null && m.servings > 0) return m.servings;
+    const recipe = getRecipe(m.recipeId);
     const base = recipe && recipe.servingsBase ? Number(recipe.servingsBase) : 2;
     return base > 0 ? base : 2;
   }
@@ -530,73 +719,91 @@
 
   function getDay(iso) {
     if (!state.plan[iso]) state.plan[iso] = emptyDay();
+    migrateDayMeals(state.plan[iso]);
     return state.plan[iso];
   }
 
   function setSlot(iso, slot, recipeId, servings) {
     const day = getDay(iso);
     if (!["breakfast", "lunch", "dinner"].includes(slot)) return;
-    if (!recipeId) {
-      day[slot] = null;
-    } else {
-      const recipe = getRecipe(recipeId);
-      const base = getRecipeServingsBase(recipe);
-      let s = servings == null || servings === "" ? base : Number(servings);
-      if (!(s > 0)) s = base;
-      day[slot] = { recipeId: recipeId, servings: s };
-      if (slot === "breakfast") day.showBreakfast = true;
-      if (slot === "lunch") day.showLunch = true;
+    let meal = primaryMeal(day, slot);
+    if (!meal) {
+      const id = addMeal(iso, slot, "");
+      meal = getMeal(getDay(iso), id);
     }
-    persist();
+    if (!meal) return;
+    setMealRecipe(iso, meal.id, recipeId, servings);
   }
 
   function setSlotServings(iso, slot, servings) {
     const day = getDay(iso);
-    const cur = normalizeSlot(day[slot]);
-    if (!cur) return;
-    const recipe = getRecipe(cur.recipeId);
-    const base = getRecipeServingsBase(recipe);
-    let s = Number(servings);
-    if (!(s > 0)) s = base;
-    day[slot] = { recipeId: cur.recipeId, servings: s };
-    persist();
+    const meal = primaryMeal(day, slot);
+    if (!meal || !meal.recipeId) return;
+    setMealServings(iso, meal.id, servings);
   }
 
   function toggleExtraSlot(iso, slot, show) {
     const day = getDay(iso);
-    if (slot === "breakfast") {
-      day.showBreakfast = !!show;
-      if (!show) day.breakfast = null;
+    if (!["breakfast", "lunch"].includes(slot)) return;
+    if (show) {
+      if (!(day.meals || []).some((m) => m.slot === slot)) {
+        addMeal(iso, slot, "");
+      } else {
+        if (slot === "breakfast") day.showBreakfast = true;
+        if (slot === "lunch") day.showLunch = true;
+        syncLegacyFromMeals(day);
+        persist();
+      }
+    } else {
+      day.meals = (day.meals || []).filter((m) => m.slot !== slot);
+      syncLegacyFromMeals(day);
+      persist();
     }
-    if (slot === "lunch") {
-      day.showLunch = !!show;
-      if (!show) day.lunch = null;
-    }
-    persist();
   }
 
   function copySlot(fromDay, fromSlot, targets) {
     const src = getDay(fromDay);
-    const val = src[fromSlot];
+    const srcMeals = listMeals(src, fromSlot);
     targets.forEach(({ day, slot }) => {
       const d = getDay(day);
-      d[slot] = val ? JSON.parse(JSON.stringify(normalizeSlot(val))) : null;
-      if (slot === "breakfast" && val) d.showBreakfast = true;
-      if (slot === "lunch" && val) d.showLunch = true;
+      // replace meals of target slot with copies of source slot meals
+      d.meals = (d.meals || []).filter((m) => m.slot !== slot);
+      srcMeals.forEach((m) => {
+        d.meals.push({
+          id: uid(),
+          slot: slot || m.slot,
+          label: m.label || "",
+          recipeId: m.recipeId || null,
+          servings: m.servings,
+        });
+      });
+      if (slot === "dinner" && !d.meals.some((m) => m.slot === "dinner")) {
+        d.meals.push({ id: uid(), slot: "dinner", label: "", recipeId: null, servings: null });
+      }
+      syncLegacyFromMeals(d);
     });
     persist();
   }
 
   function copyDay(fromDay, toDays) {
-    const src = { ...getDay(fromDay) };
+    const src = getDay(fromDay);
+    const mealsCopy = (src.meals || []).map((m) => ({
+      id: uid(),
+      slot: m.slot,
+      label: m.label || "",
+      recipeId: m.recipeId || null,
+      servings: m.servings,
+    }));
     (toDays || []).forEach((day) => {
       state.plan[day] = {
-        dinner: src.dinner,
-        breakfast: src.breakfast,
-        lunch: src.lunch,
-        showBreakfast: src.showBreakfast,
-        showLunch: src.showLunch,
+        meals: mealsCopy.map((m) => ({ ...m, id: uid() })),
+        dinner: null,
+        breakfast: null,
+        lunch: null,
+        showBreakfast: false,
+        showLunch: false,
       };
+      migrateDayMeals(state.plan[day]);
     });
     persist();
   }
@@ -606,6 +813,32 @@
       .trim()
       .toLowerCase()
       .replace(/\s+/g, " ");
+  }
+
+  /** Parse qty safely: "60", "1,5", " 2 " → number; empty/invalid → null (never NaN) */
+  function parseQty(raw) {
+    if (raw == null || raw === "") return null;
+    if (typeof raw === "number") {
+      return Number.isFinite(raw) ? raw : null;
+    }
+    let s = String(raw).trim();
+    if (!s || /^nan$/i.test(s)) return null;
+    s = s.replace(",", ".");
+    // keep leading digits / one dot (strip unit text if pasted in qty)
+    const m = s.match(/-?\d+(?:\.\d+)?/);
+    if (!m) return null;
+    const n = Number(m[0]);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function cleanIngredientList(list) {
+    return (list || [])
+      .map((i) => ({
+        name: String(i.name || "").trim(),
+        qty: parseQty(i.qty),
+        unit: String(i.unit || "").trim(),
+      }))
+      .filter((i) => i.name);
   }
 
   const DEFAULT_SHOP_PRESETS = [
@@ -705,22 +938,21 @@
     }
 
     (days || []).forEach((iso) => {
-      const day = state.plan[iso] || emptyDay();
-      const slotNames = [];
-      if (day.showBreakfast && getSlotRecipeId(day, "breakfast")) slotNames.push("breakfast");
-      if (day.showLunch && getSlotRecipeId(day, "lunch")) slotNames.push("lunch");
-      if (getSlotRecipeId(day, "dinner")) slotNames.push("dinner");
-      slotNames.forEach((slot) => {
-        const rid = getSlotRecipeId(day, slot);
-        const recipe = getRecipe(rid);
+      const day = state.plan[iso] ? migrateDayMeals(state.plan[iso]) : emptyDay();
+      listMeals(day).forEach((meal) => {
+        if (!meal.recipeId) return;
+        const recipe = getRecipe(meal.recipeId);
         if (!recipe) return;
         const base = getRecipeServingsBase(recipe);
-        const servings = getSlotServings(day, slot) || base;
+        const servings =
+          meal.servings != null && meal.servings > 0 ? meal.servings : base;
         const factor = base > 0 ? servings / base : 1;
-        const label = recipe.name + (servings !== base ? " (" + servings + "p)" : "");
+        const who = meal.label ? " · " + meal.label : "";
+        const label =
+          recipe.name + who + (servings !== base ? " (" + servings + "p)" : "");
         (recipe.ingredients || []).forEach((ing) => {
-          const q = ing.qty == null || ing.qty === "" ? null : Number(ing.qty);
-          const scaled = q == null || Number.isNaN(q) ? null : Math.round(q * factor * 100) / 100;
+          const q = parseQty(ing.qty);
+          const scaled = q == null ? null : Math.round(q * factor * 100) / 100;
           addIng(ing.name, scaled, ing.unit, label);
         });
       });
@@ -1163,9 +1395,22 @@
 
   function setSlotSilent(iso, slot, recipeId) {
     const day = getDay(iso);
-    const recipe = getRecipe(recipeId);
-    const base = getRecipeServingsBase(recipe);
-    day[slot] = recipeId ? { recipeId: recipeId, servings: base } : null;
+    let meal = primaryMeal(day, slot);
+    if (!meal) {
+      day.meals.push({ id: uid(), slot, label: "", recipeId: null, servings: null });
+      meal = primaryMeal(day, slot);
+    }
+    if (!meal) return;
+    if (!recipeId) {
+      meal.recipeId = null;
+      meal.servings = null;
+    } else {
+      const recipe = getRecipe(recipeId);
+      const base = getRecipeServingsBase(recipe);
+      meal.recipeId = recipeId;
+      meal.servings = base;
+    }
+    syncLegacyFromMeals(day);
   }
 
   global.MealStore = {
@@ -1194,6 +1439,15 @@
     setSlotServings,
     getSlotRecipeId,
     getSlotServings,
+    listMeals,
+    getMeal,
+    addMeal,
+    removeMeal,
+    setMealRecipe,
+    setMealServings,
+    setMealLabel,
+    getMealLabels,
+    primaryMeal,
     getRecipeServingsBase,
     getRecipeKcalPerPerson,
     normalizeSlot,

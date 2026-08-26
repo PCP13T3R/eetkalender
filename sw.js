@@ -1,5 +1,5 @@
 /* Eetkalender service worker — network-first for app code so updates landen snel */
-const CACHE = "eetkalender-v15";
+const CACHE = "eetkalender-v17";
 const ASSETS = [
   "./",
   "./index.html",

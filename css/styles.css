@@ -758,6 +758,18 @@ button {
   background: var(--brand-soft);
 }
 
+.meal-who {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand-dark);
+  font-size: 0.72rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
 /* Shopping */
 .check-item {
   display: flex;

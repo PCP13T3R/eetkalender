@@ -10,5 +10,5 @@ window.MEAL_CONFIG = {
     url: "https://vgxrzldimgngqytimvon.supabase.co",
     anonKey: "",
   },
-  syncIntervalMs: 8000,
+  syncIntervalMs: 3000,
 };

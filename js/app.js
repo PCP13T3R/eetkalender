@@ -19,7 +19,7 @@
     "december",
   ];
 
-  const SLOT_LABEL = { breakfast: "Ontbijt", lunch: "Lunch", dinner: "Avond" };
+  const SLOT_LABEL = { breakfast: "Ochtend", lunch: "Middag", dinner: "Avond" };
 
   let weekStart = MealStore.startOfWeekISO(MealStore.todayISO());
   let monthCursor = startOfMonthISO(MealStore.todayISO());
@@ -101,21 +101,21 @@
     return recipeName(MealStore.getSlotRecipeId(day, slot));
   }
 
-  /** Kcal/p for a slot — per person, NOT × servings */
-  function slotKcal(day, slot) {
-    const rid = MealStore.getSlotRecipeId(day, slot);
-    if (!rid) return null;
-    return MealStore.getRecipeKcalPerPerson(MealStore.getRecipe(rid));
+  function mealWho(label) {
+    return label ? String(label) : "";
   }
 
-  /** Sum of kcal/p of breakfast+lunch+dinner for the day (still per person totals) */
+  function mealKcal(meal) {
+    if (!meal || !meal.recipeId) return null;
+    return MealStore.getRecipeKcalPerPerson(MealStore.getRecipe(meal.recipeId));
+  }
+
+  /** Sum of kcal/p of all planned meals that day */
   function dayTotalKcal(day) {
     let total = 0;
     let any = false;
-    ["breakfast", "lunch", "dinner"].forEach((slot) => {
-      if (slot === "breakfast" && !day.showBreakfast) return;
-      if (slot === "lunch" && !day.showLunch) return;
-      const k = slotKcal(day, slot);
+    MealStore.listMeals(day).forEach((m) => {
+      const k = mealKcal(m);
       if (k != null) {
         total += k;
         any = true;
@@ -238,17 +238,27 @@
       card.dataset.day = iso;
 
       let mealsHtml = "";
-      if (day.showBreakfast) {
-        mealsHtml += mealRowHtml(day, "breakfast");
-      }
-      if (day.showLunch) {
-        mealsHtml += mealRowHtml(day, "lunch");
-      }
-      mealsHtml += mealRowHtml(day, "dinner");
+      MealStore.listMeals(day, "breakfast").forEach((m) => {
+        mealsHtml += mealRowHtml(m);
+      });
+      MealStore.listMeals(day, "lunch").forEach((m) => {
+        mealsHtml += mealRowHtml(m);
+      });
+      MealStore.listMeals(day, "dinner").forEach((m) => {
+        mealsHtml += mealRowHtml(m);
+      });
 
       const extras = [];
-      if (!day.showBreakfast) extras.push('<button type="button" class="btn btn-sm btn-secondary" data-act="add-slot" data-slot="breakfast">+ Ontbijt</button>');
-      if (!day.showLunch) extras.push('<button type="button" class="btn btn-sm btn-secondary" data-act="add-slot" data-slot="lunch">+ Lunch</button>');
+      if (!MealStore.listMeals(day, "breakfast").length) {
+        extras.push(
+          '<button type="button" class="btn btn-sm btn-secondary" data-act="add-slot" data-slot="breakfast">+ Ochtend</button>'
+        );
+      }
+      if (!MealStore.listMeals(day, "lunch").length) {
+        extras.push(
+          '<button type="button" class="btn btn-sm btn-secondary" data-act="add-slot" data-slot="lunch">+ Middag</button>'
+        );
+      }
 
       const dayKcal = dayTotalKcal(day);
       // Layout: [Datum + groen dagtotaal-kcal] ........ [VANDAAG]
@@ -290,33 +300,36 @@
       const iso = y + "-" + String(m).padStart(2, "0") + "-" + String(d).padStart(2, "0");
       const meta = formatDayHeader(iso);
       const day = MealStore.getDay(iso);
-      const dinnerId = MealStore.getSlotRecipeId(day, "dinner");
-      const dinner = dinnerId ? recipeName(dinnerId) : null;
-      const dinnerServ = dinnerId ? MealStore.getSlotServings(day, "dinner") : null;
-      const dinnerRec = dinnerId ? MealStore.getRecipe(dinnerId) : null;
-      const dinnerKcal = dinnerRec ? MealStore.getRecipeKcalPerPerson(dinnerRec) : null;
-      if (dinner) planned++;
+      const dinners = MealStore.listMeals(day, "dinner").filter((m) => m.recipeId);
+      if (dinners.length) planned++;
+      const dinnerLines = dinners.map((m) => {
+        const n = recipeName(m.recipeId);
+        const who = m.label ? m.label + ": " : "";
+        const s = m.servings ? " · " + m.servings + "p" : "";
+        return who + n + s;
+      });
+      const dinnerText = dinnerLines.length ? dinnerLines.join(" · ") : null;
 
       const extras = [];
-      if (day.showBreakfast && MealStore.getSlotRecipeId(day, "breakfast")) {
-        const n = slotRecipeName(day, "breakfast");
-        const s = MealStore.getSlotServings(day, "breakfast");
-        const kr = MealStore.getRecipe(MealStore.getSlotRecipeId(day, "breakfast"));
-        const k = kr ? MealStore.getRecipeKcalPerPerson(kr) : null;
-        if (n) extras.push("Ontbijt: " + n + (s ? " (" + s + "p)" : "") + (k != null ? " · " + k + " Kcal" : ""));
-      }
-      if (day.showLunch && MealStore.getSlotRecipeId(day, "lunch")) {
-        const n = slotRecipeName(day, "lunch");
-        const s = MealStore.getSlotServings(day, "lunch");
-        const kr = MealStore.getRecipe(MealStore.getSlotRecipeId(day, "lunch"));
-        const k = kr ? MealStore.getRecipeKcalPerPerson(kr) : null;
-        if (n) extras.push("Lunch: " + n + (s ? " (" + s + "p)" : "") + (k != null ? " · " + k + " Kcal" : ""));
-      }
+      MealStore.listMeals(day, "breakfast")
+        .filter((m) => m.recipeId)
+        .forEach((m) => {
+          const n = recipeName(m.recipeId);
+          const who = m.label ? m.label + " " : "";
+          extras.push("Ochtend " + who + n);
+        });
+      MealStore.listMeals(day, "lunch")
+        .filter((m) => m.recipeId)
+        .forEach((m) => {
+          const n = recipeName(m.recipeId);
+          const who = m.label ? m.label + " " : "";
+          extras.push("Middag " + who + n);
+        });
 
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className =
-        "month-row" + (meta.isToday ? " today" : "") + (dinner ? "" : " empty-dinner");
+        "month-row" + (meta.isToday ? " today" : "") + (dinnerText ? "" : " empty-dinner");
       btn.dataset.day = iso;
       btn.innerHTML =
         '<div class="m-date"><div class="m-daynum">' +
@@ -326,11 +339,10 @@
         "</div></div>" +
         '<div class="m-body">' +
         '<div class="m-dinner' +
-        (dinner ? "" : " none") +
+        (dinnerText ? "" : " none") +
         '">' +
-        escapeHtml(dinner ? dinner + (dinnerServ ? " · " + dinnerServ + "p" : "") : "— nog open —") +
+        escapeHtml(dinnerText || "— nog open —") +
         "</div>" +
-        (dinnerKcal != null ? kcalPillHtml(dinnerKcal, "meal") : "") +
         (extras.length
           ? '<div class="m-meta">' + escapeHtml(extras.join(" · ")) + "</div>"
           : meta.isToday
@@ -353,20 +365,29 @@
     frags.forEach((el) => host.appendChild(el));
   }
 
-  function mealRowHtml(day, slot) {
-    const recipeId = MealStore.getSlotRecipeId(day, slot);
+  function mealRowHtml(meal) {
+    const slot = meal.slot;
+    const recipeId = meal.recipeId;
     const name = recipeName(recipeId);
     const recipe = recipeId ? MealStore.getRecipe(recipeId) : null;
-    const servings = recipeId ? MealStore.getSlotServings(day, slot) : null;
-    const kcal = recipe ? MealStore.getRecipeKcalPerPerson(recipe) : null;
-    // Layout: [AVOND + groen kcal eronder] | [naam · 2p + sterren]
+    const servings =
+      recipeId && meal.servings != null && meal.servings > 0
+        ? meal.servings
+        : recipeId
+          ? MealStore.getRecipeServingsBase(recipe)
+          : null;
+    const kcal = mealKcal(meal);
+    const who = mealWho(meal.label);
     return (
-      '<div class="meal-row" data-slot="' +
+      '<div class="meal-row" data-meal-id="' +
+      escapeAttr(meal.id) +
+      '" data-slot="' +
       slot +
       '">' +
       '<div class="slot-col">' +
       '<div class="slot-label">' +
       SLOT_LABEL[slot] +
+      (who ? ' <span class="meal-who">' + escapeHtml(who) + "</span>" : "") +
       "</div>" +
       (kcal != null ? kcalPillHtml(kcal, "meal") : "") +
       "</div>" +
@@ -399,20 +420,45 @@
 
   function buildDaySheetBody(iso, day) {
     const wrap = document.createElement("div");
+    const labels = MealStore.getMealLabels();
 
-    function slotBlock(slot, visible) {
-      if (!visible && slot !== "dinner") return null;
-      const rid = MealStore.getSlotRecipeId(day, slot);
+    function mealBlock(meal) {
+      const slot = meal.slot;
+      const rid = meal.recipeId;
       const r = rid ? MealStore.getRecipe(rid) : null;
-      const serv = rid ? MealStore.getSlotServings(day, slot) : null;
       const base = r ? MealStore.getRecipeServingsBase(r) : 2;
+      const serv =
+        rid && meal.servings != null && meal.servings > 0 ? meal.servings : rid ? base : null;
       const kcal = r ? MealStore.getRecipeKcalPerPerson(r) : null;
+      const who = meal.label || "";
       const box = document.createElement("div");
       box.className = "settings-card";
       box.innerHTML =
         "<h3>" +
         SLOT_LABEL[slot] +
+        (who ? " · " + escapeHtml(who) : "") +
         "</h3>" +
+        '<div class="field" style="margin:0 0 8px"><label>Voor wie?</label>' +
+        '<select data-meal-label="' +
+        escapeAttr(meal.id) +
+        '" style="width:100%;min-height:42px;border-radius:12px;border:1px solid var(--line);padding:0 10px">' +
+        '<option value="">Iedereen</option>' +
+        labels
+          .map(
+            (lb) =>
+              '<option value="' +
+              escapeAttr(lb) +
+              '"' +
+              (who === lb ? " selected" : "") +
+              ">" +
+              escapeHtml(lb) +
+              "</option>"
+          )
+          .join("") +
+        (who && labels.indexOf(who) < 0
+          ? '<option value="' + escapeAttr(who) + '" selected>' + escapeHtml(who) + "</option>"
+          : "") +
+        "</select></div>" +
         "<p>" +
         (r ? escapeHtml(r.name) : "Nog geen gerecht") +
         (r && r.rating ? " · " + "★".repeat(r.rating) : "") +
@@ -423,78 +469,137 @@
             base +
             "p)</label>" +
             '<div class="btn-row" style="align-items:center">' +
-            '<button type="button" class="btn btn-sm btn-secondary" data-day-act="serv-minus" data-slot="' +
-            slot +
+            '<button type="button" class="btn btn-sm btn-secondary" data-day-act="serv-minus" data-meal-id="' +
+            escapeAttr(meal.id) +
             '">−</button>' +
             '<span style="min-width:3rem;text-align:center;font-weight:700" data-serv-label="' +
-            slot +
+            escapeAttr(meal.id) +
             '">' +
             serv +
             "p</span>" +
-            '<button type="button" class="btn btn-sm btn-secondary" data-day-act="serv-plus" data-slot="' +
-            slot +
+            '<button type="button" class="btn btn-sm btn-secondary" data-day-act="serv-plus" data-meal-id="' +
+            escapeAttr(meal.id) +
             '">+</button>' +
             '<input type="number" min="1" max="99" value="' +
             serv +
             '" data-serv-input="' +
-            slot +
+            escapeAttr(meal.id) +
             '" style="width:4.5rem;min-height:36px;border-radius:12px;border:1px solid var(--line);padding:0 8px" />' +
             "</div></div>"
           : "") +
         '<div class="btn-row">' +
-        '<button type="button" class="btn btn-sm btn-primary" data-day-act="pick" data-slot="' +
+        '<button type="button" class="btn btn-sm btn-primary" data-day-act="pick" data-meal-id="' +
+        escapeAttr(meal.id) +
+        '" data-slot="' +
         slot +
         '">Kies recept</button>' +
         (r
-          ? '<button type="button" class="btn btn-sm btn-secondary" data-day-act="rate" data-slot="' +
-            slot +
+          ? '<button type="button" class="btn btn-sm btn-secondary" data-day-act="rate" data-meal-id="' +
+            escapeAttr(meal.id) +
             '">Score</button>' +
-            '<button type="button" class="btn btn-sm btn-secondary" data-day-act="copy-slot" data-slot="' +
-            slot +
-            '">Kopieer</button>' +
-            '<button type="button" class="btn btn-sm btn-ghost" data-day-act="clear" data-slot="' +
-            slot +
-            '">Wis</button>'
+            '<button type="button" class="btn btn-sm btn-ghost" data-day-act="clear" data-meal-id="' +
+            escapeAttr(meal.id) +
+            '">Wis recept</button>'
           : "") +
-        (slot !== "dinner"
-          ? '<button type="button" class="btn btn-sm btn-danger" data-day-act="hide-slot" data-slot="' +
-            slot +
-            '">Verberg</button>'
-          : "") +
+        '<button type="button" class="btn btn-sm btn-danger" data-day-act="remove-meal" data-meal-id="' +
+        escapeAttr(meal.id) +
+        '">Verwijder</button>' +
         "</div>";
       return box;
     }
 
-    ["breakfast", "lunch", "dinner"].forEach((slot) => {
-      const visible = slot === "dinner" || (slot === "breakfast" ? day.showBreakfast : day.showLunch);
-      const el = slotBlock(slot, visible);
-      if (el) wrap.appendChild(el);
-    });
-
-    if (!day.showBreakfast || !day.showLunch) {
-      const extra = document.createElement("div");
-      extra.className = "btn-row";
-      if (!day.showBreakfast) {
-        extra.innerHTML +=
-          '<button type="button" class="btn btn-secondary" data-day-act="show-slot" data-slot="breakfast">+ Ontbijt toevoegen</button>';
-      }
-      if (!day.showLunch) {
-        extra.innerHTML +=
-          '<button type="button" class="btn btn-secondary" data-day-act="show-slot" data-slot="lunch">+ Lunch toevoegen</button>';
-      }
-      wrap.appendChild(extra);
+    function slotSection(slot) {
+      const meals = MealStore.listMeals(day, slot);
+      if (!meals.length && slot !== "dinner") return;
+      const head = document.createElement("div");
+      head.style.cssText = "display:flex;align-items:center;justify-content:space-between;margin:12px 0 6px";
+      head.innerHTML =
+        "<strong>" +
+        SLOT_LABEL[slot] +
+        '</strong><button type="button" class="btn btn-sm btn-secondary" data-day-act="add-meal" data-slot="' +
+        slot +
+        '">+ Extra ' +
+        SLOT_LABEL[slot].toLowerCase() +
+        "</button>";
+      wrap.appendChild(head);
+      meals.forEach((m) => wrap.appendChild(mealBlock(m)));
     }
+
+    slotSection("breakfast");
+    slotSection("lunch");
+    slotSection("dinner");
+
+    const addRow = document.createElement("div");
+    addRow.className = "btn-row";
+    addRow.style.marginTop = "8px";
+    if (!MealStore.listMeals(day, "breakfast").length) {
+      addRow.innerHTML +=
+        '<button type="button" class="btn btn-secondary" data-day-act="show-slot" data-slot="breakfast">+ Ochtend toevoegen</button>';
+    }
+    if (!MealStore.listMeals(day, "lunch").length) {
+      addRow.innerHTML +=
+        '<button type="button" class="btn btn-secondary" data-day-act="show-slot" data-slot="lunch">+ Middag toevoegen</button>';
+    }
+    if (addRow.innerHTML) wrap.appendChild(addRow);
+
+    wrap.addEventListener("change", (e) => {
+      const sel = e.target.closest("[data-meal-label]");
+      if (!sel) return;
+      MealStore.setMealLabel(iso, sel.getAttribute("data-meal-label"), sel.value);
+      openDaySheet(iso);
+      renderCalendar();
+    });
 
     wrap.addEventListener("click", (e) => {
       const btn = e.target.closest("[data-day-act]");
       if (!btn) return;
       const act = btn.dataset.dayAct;
       const slot = btn.dataset.slot;
-      if (act === "pick") openRecipePicker(iso, slot);
+      const mealId = btn.dataset.mealId;
+      if (act === "pick") openRecipePicker(iso, mealId, slot);
       if (act === "clear") {
-        MealStore.setSlot(iso, slot, null);
+        MealStore.setMealRecipe(iso, mealId, null);
         openDaySheet(iso);
-        toast("Gewist");
+        toast("Recept gewist");
+      }
+      if (act === "remove-meal") {
+        MealStore.removeMeal(iso, mealId);
+        openDaySheet(iso);
+        renderCalendar();
+        toast("Maaltijd verwijderd");
+      }
+      if (act === "add-meal") {
+        // Ask label quickly
+        const body = document.createElement("div");
+        body.innerHTML =
+          "<p style=\"margin:0 0 8px\">Extra " +
+          SLOT_LABEL[slot] +
+          " — voor wie?</p>" +
+          '<div class="btn-row" style="flex-wrap:wrap">' +
+          '<button type="button" class="btn btn-sm btn-secondary" data-who="">Iedereen</button>' +
+          labels
+            .map(
+              (lb) =>
+                '<button type="button" class="btn btn-sm btn-secondary" data-who="' +
+                escapeAttr(lb) +
+                '">' +
+                escapeHtml(lb) +
+                "</button>"
+            )
+            .join("") +
+          "</div>";
+        body.querySelectorAll("[data-who]").forEach((b) => {
+          b.addEventListener("click", () => {
+            const id = MealStore.addMeal(iso, slot, b.getAttribute("data-who") || "");
+            closeSheet();
+            openDaySheet(iso);
+            if (id) openRecipePicker(iso, id, slot);
+          });
+        });
+        openSheet("Extra " + SLOT_LABEL[slot], body, [
+          { label: "Annuleer", className: "btn-secondary", action: () => openDaySheet(iso) },
+        ]);
+        return;
       }
       if (act === "show-slot") {
         MealStore.toggleExtraSlot(iso, slot, true);
@@ -505,27 +610,30 @@
         openDaySheet(iso);
       }
       if (act === "rate") {
-        const rid = MealStore.getSlotRecipeId(MealStore.getDay(iso), slot);
-        if (rid) openRating(rid, () => openDaySheet(iso));
+        const meal = MealStore.getMeal(MealStore.getDay(iso), mealId);
+        if (meal && meal.recipeId) openRating(meal.recipeId, () => openDaySheet(iso));
       }
       if (act === "copy-slot") openCopySlot(iso, slot);
       if (act === "serv-minus" || act === "serv-plus") {
-        const d = MealStore.getDay(iso);
-        let s = MealStore.getSlotServings(d, slot) || 2;
+        const meal = MealStore.getMeal(MealStore.getDay(iso), mealId);
+        if (!meal || !meal.recipeId) return;
+        const base = MealStore.getRecipeServingsBase(MealStore.getRecipe(meal.recipeId));
+        let s = meal.servings != null && meal.servings > 0 ? meal.servings : base;
         s = act === "serv-minus" ? Math.max(1, s - 1) : Math.min(99, s + 1);
-        MealStore.setSlotServings(iso, slot, s);
+        MealStore.setMealServings(iso, mealId, s);
         openDaySheet(iso);
         renderCalendar();
       }
     });
 
     wrap.addEventListener("change", (e) => {
+      if (e.target.closest("[data-meal-label]")) return; // handled above
       const inp = e.target.closest("[data-serv-input]");
       if (!inp) return;
-      const slot = inp.getAttribute("data-serv-input");
+      const mid = inp.getAttribute("data-serv-input");
       let s = Number(inp.value);
       if (!(s > 0)) s = 1;
-      MealStore.setSlotServings(iso, slot, s);
+      MealStore.setMealServings(iso, mid, s);
       openDaySheet(iso);
       renderCalendar();
     });
@@ -533,7 +641,18 @@
     return wrap;
   }
 
-  function openRecipePicker(dayIso, slot) {
+  function openRecipePicker(dayIso, mealId, slotHint) {
+    const day0 = MealStore.getDay(dayIso);
+    let meal = mealId ? MealStore.getMeal(day0, mealId) : null;
+    if (!meal && slotHint) {
+      meal = MealStore.primaryMeal(day0, slotHint);
+      mealId = meal ? meal.id : null;
+    }
+    const slot = (meal && meal.slot) || slotHint || "dinner";
+    if (!mealId) {
+      mealId = MealStore.addMeal(dayIso, slot, "");
+      meal = MealStore.getMeal(MealStore.getDay(dayIso), mealId);
+    }
     const wrap = document.createElement("div");
     wrap.innerHTML =
       '<div class="search-bar"><input type="search" id="pick-search" placeholder="Zoek recept…" /></div>' +
@@ -596,13 +715,17 @@
           action: () => {
             let s = Number(body.querySelector("#pick-serv").value);
             if (!(s > 0)) s = base;
-            MealStore.setSlot(dayIso, slot, r.id, s);
+            MealStore.setMealRecipe(dayIso, mealId, r.id, s);
             toast(r.name + " · " + s + "p");
             openDaySheet(dayIso);
             renderCalendar();
           },
         },
-        { label: "Terug", className: "btn-secondary", action: () => openRecipePicker(dayIso, slot) },
+        {
+          label: "Terug",
+          className: "btn-secondary",
+          action: () => openRecipePicker(dayIso, mealId, slot),
+        },
       ]);
     }
 
@@ -660,7 +783,7 @@
           const r = MealStore.getRecipe(savedId);
           if (r) chooseRecipe(r);
           else {
-            MealStore.setSlot(dayIso, slot, savedId);
+            MealStore.setMealRecipe(dayIso, mealId, savedId);
             openDaySheet(dayIso);
             renderCalendar();
           }
@@ -668,7 +791,8 @@
       });
     });
 
-    openSheet("Kies recept · " + SLOT_LABEL[slot], wrap, [
+    const who = meal && meal.label ? " · " + meal.label : "";
+    openSheet("Kies recept · " + SLOT_LABEL[slot] + who, wrap, [
       { label: "Terug", className: "btn-secondary", action: () => openDaySheet(dayIso) },
     ]);
   }
@@ -680,9 +804,9 @@
       '<div class="day-pick" id="copy-days"></div>' +
       '<label class="field"><span>Naar welk moment?</span>' +
       '<select id="copy-slot">' +
-      '<option value="breakfast">Ontbijt</option>' +
-      '<option value="lunch">Lunch</option>' +
-      '<option value="dinner">Avondeten</option>' +
+      '<option value="breakfast">Ochtend</option>' +
+      '<option value="lunch">Middag</option>' +
+      '<option value="dinner">Avond</option>' +
       "</select></label>";
 
     const host = $("#copy-days", wrap);
@@ -1012,7 +1136,11 @@
           escapeAttr(ing.name || "") +
           '" />' +
           '<input data-f="qty" placeholder="hoev." inputmode="decimal" value="' +
-          escapeAttr(ing.qty == null ? "" : String(ing.qty)) +
+          escapeAttr(
+            ing.qty == null || ing.qty === "" || (typeof ing.qty === "number" && !Number.isFinite(ing.qty))
+              ? ""
+              : String(ing.qty)
+          ) +
           '" />' +
           '<input data-f="unit" placeholder="eenheid" value="' +
           escapeAttr(ing.unit || "") +
@@ -1161,11 +1289,7 @@
       windowDays.forEach((iso) => {
         const meta = formatDayHeader(iso);
         const day = MealStore.getDay(iso);
-        const hasMeal = !!(
-          MealStore.getSlotRecipeId(day, "dinner") ||
-          (day.showBreakfast && MealStore.getSlotRecipeId(day, "breakfast")) ||
-          (day.showLunch && MealStore.getSlotRecipeId(day, "lunch"))
-        );
+        const hasMeal = MealStore.listMeals(day).some((m) => !!m.recipeId);
         const lab = document.createElement("label");
         lab.innerHTML =
           '<input type="checkbox" value="' +
@@ -1511,7 +1635,10 @@ create policy "meal_calendar_write"
       }
       const meal = e.target.closest(".meal-row");
       if (meal) {
-        openDaySheet(iso);
+        const mid = meal.getAttribute("data-meal-id");
+        const sl = meal.getAttribute("data-slot");
+        if (mid) openRecipePicker(iso, mid, sl);
+        else openDaySheet(iso);
         return;
       }
       openDaySheet(iso);
